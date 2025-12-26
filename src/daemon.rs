@@ -7,13 +7,15 @@ use tokio::time::{sleep, Duration};
 use crate::config::Config;
 use crate::cpu_analyzer::CpuAnalyzer;
 use crate::cron_watcher::CronWatcher;
-use crate::database::{IntelligenceDB, ProcessRecord};
+use crate::database::{IntelligenceDB, ProcessRecord, MalwareFile};
 use crate::intelligence::BehaviorIntelligence;
 use crate::kill_engine::KillEngine;
 use crate::npm_scanner::NpmScanner;
 use crate::process_monitor::ProcessMonitor;
 use crate::react_detector::ReactDetector;
 use crate::telegram::TelegramReporter;
+use crate::file_scanner::FileScanner;
+use crate::file_quarantine::FileQuarantine;
 
 pub struct SentinelDaemon {
     config: Config,
@@ -26,6 +28,8 @@ pub struct SentinelDaemon {
     intelligence: BehaviorIntelligence,
     kill_engine: KillEngine,
     telegram: TelegramReporter,
+    file_scanner: Option<FileScanner>,
+    file_quarantine: Option<FileQuarantine>,
 }
 
 impl SentinelDaemon {
@@ -57,6 +61,28 @@ impl SentinelDaemon {
         
         let telegram = TelegramReporter::new(config.telegram.clone(), db.clone());
 
+        // Initialize file scanner if enabled
+        let (file_scanner, file_quarantine) = if config.file_scanning.enabled {
+            let scan_paths: Vec<PathBuf> = config.file_scanning.scan_paths
+                .iter()
+                .map(|p| PathBuf::from(p))
+                .collect();
+            let quarantine_path = PathBuf::from(&config.file_scanning.quarantine_path);
+            
+            let scanner = FileScanner::new(scan_paths, quarantine_path.clone());
+            let quarantine = FileQuarantine::new(
+                quarantine_path,
+                config.file_scanning.auto_delete,
+            );
+            
+            info!("✅ File scanner initialized (scanning {} paths)", 
+                  config.file_scanning.scan_paths.len());
+            
+            (Some(scanner), Some(quarantine))
+        } else {
+            (None, None)
+        };
+
         Ok(Self {
             config,
             monitor,
@@ -68,6 +94,8 @@ impl SentinelDaemon {
             intelligence,
             kill_engine,
             telegram,
+            file_scanner,
+            file_quarantine,
         })
     }
 
@@ -91,6 +119,14 @@ impl SentinelDaemon {
 
         let mut cron_check_counter = 0u64;
         let cron_check_interval = 60; // Check cron every 60 iterations (5 min at 5s intervals)
+        
+        let mut file_scan_counter = 0u64;
+        let file_scan_interval = if self.config.file_scanning.enabled {
+            // Convert minutes to iterations (assuming 5s polling interval)
+            (self.config.file_scanning.scan_interval_minutes * 60) / (self.config.polling_interval_ms / 1000)
+        } else {
+            u64::MAX // Never scan if disabled
+        };
 
         loop {
             // Refresh process information
@@ -309,6 +345,106 @@ impl SentinelDaemon {
                     }
                     Err(e) => {
                         warn!("Failed to scan cron jobs: {}", e);
+                    }
+                }
+            }
+
+            // Periodically scan for malware files
+            if self.config.file_scanning.enabled {
+                file_scan_counter += 1;
+                if file_scan_counter >= file_scan_interval {
+                    file_scan_counter = 0;
+                    
+                    if let (Some(ref scanner), Some(ref quarantine)) = 
+                        (&self.file_scanner, &self.file_quarantine) {
+                        
+                        info!("🔍 Starting file system malware scan...");
+                        
+                        match scanner.scan_all_paths() {
+                            Ok(detected_files) => {
+                                if !detected_files.is_empty() {
+                                    warn!("🚨 Found {} malicious file(s)!", detected_files.len());
+                                    
+                                    for malware in detected_files {
+                                        // Kill processes using the file if configured
+                                        if self.config.file_scanning.kill_processes_using_file {
+                                            if let Err(e) = quarantine
+                                                .kill_processes_using_file(&malware.file_path)
+                                                .await {
+                                                warn!("Failed to kill processes using {}: {}", 
+                                                      malware.file_path.display(), e);
+                                            }
+                                        }
+                                        
+                                        // Quarantine or delete the file
+                                        let action_result = match quarantine.handle_malware(&malware.file_path) {
+                                            Ok(result) => result,
+                                            Err(e) => {
+                                                error!("Failed to handle malware file {}: {}", 
+                                                      malware.file_path.display(), e);
+                                                continue;
+                                            }
+                                        };
+                                        
+                                        // Record in database
+                                        let db_malware = MalwareFile {
+                                            id: 0,
+                                            file_path: malware.file_path.to_string_lossy().to_string(),
+                                            file_hash: malware.file_hash.clone(),
+                                            file_size: malware.file_size as i64,
+                                            signature_name: malware.signature.name.clone(),
+                                            threat_level: malware.signature.threat_level,
+                                            action_taken: match action_result {
+                                                crate::file_quarantine::QuarantineResult::Quarantined(_) => 
+                                                    "quarantined".to_string(),
+                                                crate::file_quarantine::QuarantineResult::Deleted => 
+                                                    "deleted".to_string(),
+                                            },
+                                            quarantine_path: match action_result {
+                                                crate::file_quarantine::QuarantineResult::Quarantined(ref path) => 
+                                                    Some(path.to_string_lossy().to_string()),
+                                                crate::file_quarantine::QuarantineResult::Deleted => None,
+                                            },
+                                            detected_at: malware.detected_at,
+                                        };
+                                        
+                                        if let Err(e) = self.db.record_malware_file(&db_malware).await {
+                                            error!("Failed to record malware file: {}", e);
+                                        }
+                                        
+                                        // Send alert if enabled
+                                        if self.config.real_time_alerts {
+                                            if let Some(_) = &self.config.telegram {
+                                                let action_str = match action_result {
+                                                    crate::file_quarantine::QuarantineResult::Quarantined(ref p) => 
+                                                        format!("Quarantined to: {}", p.display()),
+                                                    crate::file_quarantine::QuarantineResult::Deleted => 
+                                                        "Deleted".to_string(),
+                                                };
+                                                
+                                                let alert_msg = format!(
+                                                    "Malware file detected and {}!\n\nFile: {}\nSignature: {}\nThreat Level: {:.0}%\nHash: {}",
+                                                    action_str,
+                                                    malware.file_path.display(),
+                                                    malware.signature.name,
+                                                    malware.signature.threat_level * 100.0,
+                                                    &malware.file_hash[..16] // First 16 chars of hash
+                                                );
+                                                
+                                                let _ = self.telegram
+                                                    .send_alert("Malware File Detected", &alert_msg)
+                                                    .await;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    info!("✅ File scan complete - no malware detected");
+                                }
+                            }
+                            Err(e) => {
+                                error!("File scan failed: {}", e);
+                            }
+                        }
                     }
                 }
             }

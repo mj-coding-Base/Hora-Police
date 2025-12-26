@@ -35,3 +35,29 @@ bot_token = "YOUR_BOT_TOKEN_HERE"
 chat_id = "@mjpavithra"
 daily_report_time = "09:00"
 
+# File-based malware scanning configuration
+[file_scanning]
+# Enable file system malware scanning
+enabled = true
+
+# How often to scan for malware files (in minutes)
+scan_interval_minutes = 15
+
+# Directories to scan for malware files
+scan_paths = [
+    "/home",
+    "/tmp",
+    "/var/tmp",
+    "/opt",
+]
+
+# Directory where quarantined files will be stored
+quarantine_path = "/var/lib/sentinel/quarantine"
+
+# Automatically delete malware files instead of quarantining
+# WARNING: This permanently deletes files. Use with caution!
+auto_delete = false
+
+# Kill processes that are using detected malware files
+kill_processes_using_file = true
+

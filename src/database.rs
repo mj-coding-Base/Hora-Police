@@ -64,6 +64,19 @@ pub struct KillAction {
     pub timestamp: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MalwareFile {
+    pub id: i64,
+    pub file_path: String,
+    pub file_hash: String,
+    pub file_size: i64,
+    pub signature_name: String,
+    pub threat_level: f32,
+    pub action_taken: String, // "quarantined" or "deleted"
+    pub quarantine_path: Option<String>,
+    pub detected_at: DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct IntelligenceDB {
     pool: Arc<SqlitePool>,
@@ -190,6 +203,34 @@ impl IntelligenceDB {
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_kill_timestamp ON kill_actions(timestamp);
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS malware_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL,
+                file_hash TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                signature_name TEXT NOT NULL,
+                threat_level REAL NOT NULL,
+                action_taken TEXT NOT NULL,
+                quarantine_path TEXT,
+                detected_at DATETIME NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_malware_file_path ON malware_files(file_path);
+            CREATE INDEX IF NOT EXISTS idx_malware_hash ON malware_files(file_hash);
+            CREATE INDEX IF NOT EXISTS idx_malware_timestamp ON malware_files(detected_at);
             "#,
         )
         .execute(&self.pool)
@@ -380,6 +421,28 @@ impl IntelligenceDB {
         Ok(())
     }
 
+    pub async fn record_malware_file(&self, malware: &MalwareFile) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO malware_files 
+            (file_path, file_hash, file_size, signature_name, threat_level, action_taken, quarantine_path, detected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&malware.file_path)
+        .bind(&malware.file_hash)
+        .bind(malware.file_size)
+        .bind(&malware.signature_name)
+        .bind(malware.threat_level)
+        .bind(&malware.action_taken)
+        .bind(&malware.quarantine_path)
+        .bind(malware.detected_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn get_daily_summary(&self, since: DateTime<Utc>) -> Result<DailySummary> {
         let killed_count: i64 = sqlx::query_scalar(
             r#"
@@ -436,6 +499,7 @@ impl IntelligenceDB {
             killed_count: killed_count as u64,
             suspicious_processes: suspicious_count as u64,
             npm_infections: npm_count as u64,
+            malware_files: malware_files_count as u64,
             recent_kills,
         })
     }
@@ -446,6 +510,7 @@ pub struct DailySummary {
     pub killed_count: u64,
     pub suspicious_processes: u64,
     pub npm_infections: u64,
+    pub malware_files: u64,
     pub recent_kills: Vec<KillAction>,
 }
 

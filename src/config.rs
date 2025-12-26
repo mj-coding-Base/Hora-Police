@@ -14,6 +14,33 @@ pub struct Config {
     pub telegram: Option<TelegramConfig>,
     pub polling_interval_ms: u64,
     pub threat_confidence_threshold: f32,
+    #[serde(default = "default_file_scanning")]
+    pub file_scanning: FileScanningConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileScanningConfig {
+    pub enabled: bool,
+    pub scan_interval_minutes: u64,
+    pub scan_paths: Vec<String>,
+    pub quarantine_path: String,
+    pub auto_delete: bool,
+    pub kill_processes_using_file: bool,
+}
+
+fn default_file_scanning() -> FileScanningConfig {
+    FileScanningConfig {
+        enabled: true,
+        scan_interval_minutes: 15,
+        scan_paths: vec![
+            "/home".to_string(),
+            "/tmp".to_string(),
+            "/var/tmp".to_string(),
+        ],
+        quarantine_path: "/var/lib/sentinel/quarantine".to_string(),
+        auto_delete: false,
+        kill_processes_using_file: true,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +72,7 @@ impl Config {
             telegram: None,
             polling_interval_ms: 5000, // 5 seconds
             threat_confidence_threshold: 0.7,
+            file_scanning: default_file_scanning(),
         }
     }
 }

@@ -58,10 +58,12 @@ impl TelegramReporter {
             *Summary:*\n\
             • Processes Killed: {}\n\
             • Suspicious Processes: {}\n\
-            • npm Infections: {}\n\n",
+            • npm Infections: {}\n\
+            • Malware Files Detected: {}\n\n",
             summary.killed_count,
             summary.suspicious_processes,
-            summary.npm_infections
+            summary.npm_infections,
+            summary.malware_files
         );
 
         if !summary.recent_kills.is_empty() {

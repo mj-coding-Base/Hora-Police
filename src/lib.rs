@@ -9,6 +9,8 @@ pub mod npm_scanner;
 pub mod react_detector;
 pub mod intelligence;
 pub mod telegram;
+pub mod file_scanner;
+pub mod file_quarantine;
 
 pub use config::Config;
 pub use daemon::SentinelDaemon;
