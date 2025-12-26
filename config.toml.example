@@ -1,0 +1,37 @@
+# Sentinel Anti-Malware Daemon Configuration
+
+# CPU monitoring threshold (percentage)
+cpu_threshold = 20.0
+
+# Duration in minutes before flagging a process
+duration_minutes = 5
+
+# Enable real-time Telegram alerts (disabled by default to reduce noise)
+real_time_alerts = false
+
+# Automatically kill processes that exceed threat threshold
+auto_kill = true
+
+# Enable learning mode (builds intelligence from past actions)
+learning_mode = true
+
+# Path to SQLite intelligence database
+database_path = "/var/lib/sentinel/intelligence.db"
+
+# Polling interval in milliseconds (lower = more responsive, higher = less overhead)
+polling_interval_ms = 5000
+
+# Threat confidence threshold (0.0-1.0) - processes above this will be killed
+threat_confidence_threshold = 0.7
+
+# Telegram configuration (optional)
+# To set up Telegram:
+# 1. Message @BotFather on Telegram
+# 2. Create a new bot with /newbot
+# 3. Get your bot token
+# 4. Get your chat ID by messaging @userinfobot
+[telegram]
+bot_token = "YOUR_BOT_TOKEN_HERE"
+chat_id = "@mjpavithra"
+daily_report_time = "09:00"
+

@@ -1,0 +1,28 @@
+[Unit]
+Description=Sentinel Anti-Malware Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/sentinel-daemon /etc/sentinel/config.toml
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sentinel
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=100M
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target
+
