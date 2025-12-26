@@ -16,7 +16,7 @@ auto_kill = true
 learning_mode = true
 
 # Path to SQLite intelligence database
-database_path = "/var/lib/sentinel/intelligence.db"
+database_path = "/var/lib/hora-police/intelligence.db"
 
 # Polling interval in milliseconds (lower = more responsive, higher = less overhead)
 polling_interval_ms = 5000
@@ -52,7 +52,11 @@ scan_paths = [
 ]
 
 # Directory where quarantined files will be stored
-quarantine_path = "/var/lib/sentinel/quarantine"
+quarantine_path = "/var/lib/hora-police/quarantine"
+
+# Aggressively delete malware origins (parent directories, related files, cron jobs)
+# WARNING: This will permanently delete directories and files with admin authority!
+aggressive_cleanup = true
 
 # Automatically delete malware files instead of quarantining
 # WARNING: This permanently deletes files. Use with caution!

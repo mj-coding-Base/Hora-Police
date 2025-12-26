@@ -26,6 +26,12 @@ pub struct FileScanningConfig {
     pub quarantine_path: String,
     pub auto_delete: bool,
     pub kill_processes_using_file: bool,
+    #[serde(default = "default_aggressive_cleanup")]
+    pub aggressive_cleanup: bool,
+}
+
+fn default_aggressive_cleanup() -> bool {
+    true
 }
 
 fn default_file_scanning() -> FileScanningConfig {
@@ -37,9 +43,10 @@ fn default_file_scanning() -> FileScanningConfig {
             "/tmp".to_string(),
             "/var/tmp".to_string(),
         ],
-        quarantine_path: "/var/lib/sentinel/quarantine".to_string(),
+        quarantine_path: "/var/lib/hora-police/quarantine".to_string(),
         auto_delete: false,
         kill_processes_using_file: true,
+        aggressive_cleanup: true,
     }
 }
 
@@ -68,7 +75,7 @@ impl Config {
             real_time_alerts: false,
             auto_kill: true,
             learning_mode: true,
-            database_path: "/var/lib/sentinel/intelligence.db".to_string(),
+            database_path: "/var/lib/hora-police/intelligence.db".to_string(),
             telegram: None,
             polling_interval_ms: 5000, // 5 seconds
             threat_confidence_threshold: 0.7,

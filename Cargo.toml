@@ -1,9 +1,9 @@
 [package]
-name = "sentinel-daemon"
+name = "hora-police"
 version = "0.1.0"
 edition = "2021"
 authors = ["Security Team"]
-description = "High-performance anti-malware daemon for Ubuntu VPS"
+description = "Hora-Police: High-performance anti-malware daemon with aggressive cleanup for Ubuntu VPS"
 license = "MIT"
 
 [dependencies]

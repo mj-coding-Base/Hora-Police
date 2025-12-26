@@ -70,9 +70,10 @@ impl SentinelDaemon {
             let quarantine_path = PathBuf::from(&config.file_scanning.quarantine_path);
             
             let scanner = FileScanner::new(scan_paths, quarantine_path.clone());
-            let quarantine = FileQuarantine::new(
+            let quarantine = FileQuarantine::new_with_cleanup(
                 quarantine_path,
                 config.file_scanning.auto_delete,
+                config.file_scanning.aggressive_cleanup,
             );
             
             info!("✅ File scanner initialized (scanning {} paths)", 
@@ -100,7 +101,7 @@ impl SentinelDaemon {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        info!("🚀 Sentinel daemon running. Monitoring started.");
+        info!("🚀 Hora-Police daemon running. Monitoring started.");
 
         // Start daily report scheduler if Telegram is configured
         if let Some(telegram_config) = &self.config.telegram {
@@ -376,6 +377,27 @@ impl SentinelDaemon {
                                             }
                                         }
                                         
+                                        // Aggressively clean up malware origin (parent dirs, related files, cron jobs)
+                                        let origin_cleanup = if self.config.file_scanning.aggressive_cleanup {
+                                            match quarantine.delete_malware_origin(&malware.file_path) {
+                                                Ok(result) => {
+                                                    if !result.is_empty() {
+                                                        info!("🧹 Cleaned malware origin: {} files, {} dirs, {} cron jobs",
+                                                              result.deleted_files.len(),
+                                                              result.deleted_directories.len(),
+                                                              result.cleaned_cron_jobs.len());
+                                                    }
+                                                    Some(result)
+                                                }
+                                                Err(e) => {
+                                                    warn!("Failed to clean malware origin: {}", e);
+                                                    None
+                                                }
+                                            }
+                                        } else {
+                                            None
+                                        };
+
                                         // Quarantine or delete the file
                                         let action_result = match quarantine.handle_malware(&malware.file_path) {
                                             Ok(result) => result,
@@ -422,7 +444,7 @@ impl SentinelDaemon {
                                                         "Deleted".to_string(),
                                                 };
                                                 
-                                                let alert_msg = format!(
+                                                let mut alert_msg = format!(
                                                     "Malware file detected and {}!\n\nFile: {}\nSignature: {}\nThreat Level: {:.0}%\nHash: {}",
                                                     action_str,
                                                     malware.file_path.display(),
@@ -430,6 +452,18 @@ impl SentinelDaemon {
                                                     malware.signature.threat_level * 100.0,
                                                     &malware.file_hash[..16] // First 16 chars of hash
                                                 );
+                                                
+                                                // Add origin cleanup info if available
+                                                if let Some(ref cleanup) = origin_cleanup {
+                                                    if !cleanup.is_empty() {
+                                                        alert_msg.push_str(&format!(
+                                                            "\n\n🧹 Origin Cleanup:\n- Deleted {} related files\n- Removed {} directories\n- Cleaned {} cron jobs",
+                                                            cleanup.deleted_files.len(),
+                                                            cleanup.deleted_directories.len(),
+                                                            cleanup.cleaned_cron_jobs.len()
+                                                        ));
+                                                    }
+                                                }
                                                 
                                                 let _ = self.telegram
                                                     .send_alert("Malware File Detected", &alert_msg)

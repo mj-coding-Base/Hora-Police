@@ -1,9 +1,9 @@
 #!/bin/bash
-# Build script for Sentinel Anti-Malware Daemon
+# Build script for Hora-Police Anti-Malware Daemon
 
 set -e
 
-echo "🛡️  Building Sentinel Anti-Malware Daemon..."
+echo "🛡️  Building Hora-Police Anti-Malware Daemon..."
 
 # Check if Rust is installed
 if ! command -v cargo &> /dev/null; then
@@ -26,13 +26,12 @@ cargo build --release
 
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
-    echo "📦 Binary location: target/release/sentinel-daemon"
+    echo "📦 Binary location: target/release/hora-police"
     echo ""
     echo "To install:"
-    echo "  sudo cp target/release/sentinel-daemon /usr/local/bin/"
-    echo "  sudo chmod +x /usr/local/bin/sentinel-daemon"
+    echo "  sudo cp target/release/hora-police /usr/local/bin/"
+    echo "  sudo chmod +x /usr/local/bin/hora-police"
 else
     echo "❌ Build failed. Check errors above."
     exit 1
 fi
-
