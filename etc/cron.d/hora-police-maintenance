@@ -1,0 +1,4 @@
+# Weekly database maintenance for Hora-Police
+# Runs every Sunday at 3:00 AM
+0 3 * * 0 root sqlite3 /var/lib/hora-police/intelligence.db "VACUUM;" >/dev/null 2>&1
+

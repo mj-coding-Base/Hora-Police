@@ -38,6 +38,12 @@ pub struct Config {
     
     #[serde(default)]
     pub whitelist: WhitelistConfig,
+    
+    #[serde(default = "default_true")]
+    pub adaptive_polling: bool,
+    
+    #[serde(default = "default_adaptive_load_factor")]
+    pub adaptive_polling_load_factor: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +72,10 @@ fn default_deploy_grace() -> u64 {
 
 fn default_high_threshold() -> f32 {
     0.95
+}
+
+fn default_adaptive_load_factor() -> f64 {
+    1.5
 }
 
 fn default_file_scanning() -> FileScanningConfig {
@@ -148,6 +158,8 @@ impl Config {
                 auto_detect: true,
                 manual_patterns: Vec::new(),
             },
+            adaptive_polling: true,
+            adaptive_polling_load_factor: 1.5,
         }
     }
 }

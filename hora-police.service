@@ -3,25 +3,31 @@ Description=Hora-Police Anti-Malware Daemon
 After=network.target
 
 [Service]
-Type=simple
+Type=notify
 User=root
 ExecStart=/usr/local/bin/hora-police /etc/hora-police/config.toml
 Restart=on-failure
-RestartSec=10
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
-# Resource limits
-CPUQuota=10%
+# Resource limits (safe defaults for KVM4)
+CPUQuota=15%
 MemoryMax=128M
-TasksMax=512
+TasksMax=1024
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/hora-police /etc/hora-police
+ReadWritePaths=/var/lib/hora-police /etc/hora-police /var/log/hora-police
+# Optional: for fanotify (use sparingly)
+# AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
+
+# Systemd watchdog
+WatchdogSec=30s
+NotifyAccess=all
 
 [Install]
 WantedBy=multi-user.target

@@ -24,6 +24,7 @@ use crate::whitelist::WhitelistManager;
 use crate::safe_kill::{SafeKillEngine, SafeKillConfig, KillActionType};
 use crate::deploy_detector::DeployDetector;
 use crate::file_watcher::FileWatcher;
+use sd_notify::NotifyState;
 
 pub struct SentinelDaemon {
     config: Config,
@@ -48,6 +49,7 @@ pub struct SentinelDaemon {
     file_watcher: Option<FileWatcher>,
     deploy_cleanup_counter: u64,
     db_maintenance_counter: u64,
+    zombie_reaper: ZombieReaper,
 }
 
 impl SentinelDaemon {
@@ -186,6 +188,7 @@ impl SentinelDaemon {
             file_watcher,
             deploy_cleanup_counter: 0,
             db_maintenance_counter: 0,
+            zombie_reaper: ZombieReaper::new(100), // Alert if > 100 zombies
         })
     }
 

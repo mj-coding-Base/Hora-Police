@@ -4,6 +4,8 @@ use hora_police::daemon::SentinelDaemon;
 use std::path::PathBuf;
 use tracing::{error, info};
 use clap::Parser;
+use sd_notify::NotifyState;
+use tracing::warn;
 
 #[derive(Parser)]
 #[command(name = "hora-police")]
@@ -64,8 +66,15 @@ async fn main() -> Result<()> {
     
     info!("🛡️  Hora-Police daemon initialized. Starting monitoring...");
     
+    // Notify systemd that we're ready
+    if let Err(e) = sd_notify::notify(false, &[NotifyState::Ready]) {
+        warn!("Failed to notify systemd of ready state: {}", e);
+    }
+    
     if let Err(e) = daemon.run().await {
         error!("❌ Daemon error: {}", e);
+        // Notify systemd of failure
+        let _ = sd_notify::notify(false, &[NotifyState::Status("Daemon error occurred")]);
         return Err(e);
     }
 

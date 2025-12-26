@@ -20,6 +20,7 @@ pub mod deploy_detector;
 pub mod rollback;
 pub mod safe_kill;
 pub mod file_watcher;
+pub mod zombie_reaper;
 
 pub use config::Config;
 pub use daemon::SentinelDaemon;

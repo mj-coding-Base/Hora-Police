@@ -177,6 +177,19 @@ impl SystemdIntegration {
     }
 
     pub async fn stop_unit(&self, unit_name: &str) -> Result<()> {
+        // Check unit state before stopping
+        let state_output = Command::new("systemctl")
+            .args(&["is-active", unit_name])
+            .output()
+            .context("Failed to check unit state")?;
+
+        let is_active = state_output.status.success();
+        
+        if !is_active {
+            info!("Unit {} is not active, skipping stop", unit_name);
+            return Ok(());
+        }
+
         info!("Stopping systemd unit: {}", unit_name);
 
         let output = Command::new("systemctl")

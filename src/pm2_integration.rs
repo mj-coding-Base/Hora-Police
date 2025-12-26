@@ -96,15 +96,29 @@ impl Pm2Integration {
     }
 
     fn detect_apps_for_user(user: &str) -> Result<Vec<Pm2App>> {
-        // Try to run pm2 ls as the user
+        // Try to run pm2 jlist (JSON list) first, then fallback to pm2 ls
         let output = if user == "root" {
+            // Try pm2 jlist first (more reliable JSON output)
             Command::new("pm2")
-                .args(&["ls", "--no-color", "--format", "json"])
+                .args(&["jlist"])
                 .output()
+                .or_else(|_| {
+                    // Fallback to pm2 ls
+                    Command::new("pm2")
+                        .args(&["ls", "--no-color", "--format", "json"])
+                        .output()
+                })
         } else {
+            // Try pm2 jlist first
             Command::new("sudo")
-                .args(&["-u", user, "pm2", "ls", "--no-color", "--format", "json"])
+                .args(&["-u", user, "pm2", "jlist"])
                 .output()
+                .or_else(|_| {
+                    // Fallback to pm2 ls
+                    Command::new("sudo")
+                        .args(&["-u", user, "pm2", "ls", "--no-color", "--format", "json"])
+                        .output()
+                })
         };
 
         let output = output.context("Failed to execute pm2 command")?;
