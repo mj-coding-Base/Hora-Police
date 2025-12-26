@@ -94,6 +94,24 @@ impl IntelligenceDB {
     }
 
     async fn init_schema(&self) -> Result<()> {
+        // Enable WAL mode for better performance
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&self.pool)
+            .await?;
+        
+        sqlx::query("PRAGMA synchronous = NORMAL")
+            .execute(&self.pool)
+            .await?;
+        
+        sqlx::query("PRAGMA temp_store = MEMORY")
+            .execute(&self.pool)
+            .await?;
+        
+        // Set cache size to ~80MB (20000 pages * 4KB)
+        sqlx::query("PRAGMA cache_size = -20000")
+            .execute(&self.pool)
+            .await?;
+        
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS process_history (

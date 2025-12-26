@@ -170,5 +170,91 @@ impl CronWatcher {
         // This is checked during scan_all by comparing hashes
         true
     }
+
+    /// Safely remove cron entry with backup and rollback manifest
+    pub async fn remove_cron_safely(
+        &self,
+        cron_file: &str,
+        malicious_content: &str,
+        user: &str,
+        dry_run: bool,
+    ) -> Result<Option<crate::rollback::RollbackManifest>> {
+        use anyhow::Context;
+        use chrono::Utc;
+        use std::path::PathBuf;
+
+        // Read current cron file
+        let current_content = fs::read_to_string(cron_file)
+            .with_context(|| format!("Failed to read cron file: {}", cron_file))?;
+
+        // Check if malicious content exists
+        if !current_content.contains(malicious_content) {
+            return Ok(None); // Already removed or not present
+        }
+
+        // Create backup
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_path = format!("{}.backup.{}", cron_file, timestamp);
+        fs::copy(cron_file, &backup_path)
+            .with_context(|| format!("Failed to create backup: {}", backup_path))?;
+
+        // Generate rollback manifest
+        let mut manifest = crate::rollback::RollbackManifest::new();
+        manifest.add_action(crate::rollback::RollbackAction::RestoreCron {
+            user: user.to_string(),
+            content: current_content.clone(),
+            file: cron_file.to_string(),
+        });
+
+        // Sign manifest
+        if let Ok(key) = crate::rollback::get_rollback_key() {
+            manifest.sign(&key)?;
+        }
+
+        if dry_run {
+            info!("[DRY RUN] Would remove malicious cron entry from {} (backup: {})", 
+                  cron_file, backup_path);
+            return Ok(Some(manifest));
+        }
+
+        // Remove lines containing malicious content
+        let lines: Vec<&str> = current_content
+            .lines()
+            .filter(|line| !line.contains(malicious_content) && !line.trim().is_empty())
+            .collect();
+
+        // Write to temp file first
+        let temp_file = format!("{}.tmp", cron_file);
+        let new_content = if lines.is_empty() {
+            // If file would be empty, we might want to keep a comment
+            format!("# Cron file cleaned by Hora-Police at {}\n", Utc::now().to_rfc3339())
+        } else {
+            lines.join("\n") + "\n"
+        };
+
+        fs::write(&temp_file, new_content)
+            .with_context(|| format!("Failed to write temp cron file: {}", temp_file))?;
+
+        // Atomic rename
+        fs::rename(&temp_file, cron_file)
+            .with_context(|| format!("Failed to rename temp file to cron file: {}", cron_file))?;
+
+        info!("Removed malicious cron entry from {} (backup: {})", cron_file, backup_path);
+
+        // Save rollback manifest
+        let manifest_path = PathBuf::from("/var/lib/hora-police/rollbacks")
+            .join(format!("cron_{}_{}.rollback", 
+                  PathBuf::from(cron_file).file_name()
+                      .and_then(|n| n.to_str())
+                      .unwrap_or("unknown"),
+                  timestamp));
+        
+        if let Some(parent) = manifest_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        manifest.save(&manifest_path)?;
+
+        Ok(Some(manifest))
+    }
 }
 

@@ -3,6 +3,28 @@ use hora_police::config::Config;
 use hora_police::daemon::SentinelDaemon;
 use std::path::PathBuf;
 use tracing::{error, info};
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = "hora-police")]
+#[command(about = "Hora-Police Anti-Malware Daemon")]
+struct Args {
+    /// Configuration file path
+    #[arg(long, default_value = "/etc/hora-police/config.toml")]
+    config: PathBuf,
+    
+    /// Enable dry-run mode (no destructive actions)
+    #[arg(long)]
+    dry_run: bool,
+    
+    /// Enable canary mode (limited enforcement)
+    #[arg(long)]
+    canary: bool,
+    
+    /// Start telemetry probe endpoint
+    #[arg(long)]
+    probe: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -11,16 +33,31 @@ async fn main() -> Result<()> {
         .with_env_filter("hora_police=info,info")
         .init();
 
+    let args = Args::parse();
+
     info!("🚀 Hora-Police Anti-Malware Daemon starting...");
 
     // Load configuration
-    let config_path = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/etc/hora-police/config.toml"));
+    let mut config = Config::load(&args.config)?;
+    
+    // Override config with CLI flags
+    if args.dry_run {
+        config.dry_run = true;
+        info!("🔍 Dry-run mode enabled via CLI");
+    }
+    if args.canary {
+        config.canary_mode = true;
+        info!("🪶 Canary mode enabled via CLI");
+    }
+    
+    info!("✅ Configuration loaded from: {:?}", args.config);
 
-    let config = Config::load(&config_path)?;
-    info!("✅ Configuration loaded from: {:?}", config_path);
+    // Start probe endpoint if requested
+    if args.probe {
+        tokio::spawn(async move {
+            start_probe_endpoint().await;
+        });
+    }
 
     // Initialize and run daemon
     let mut daemon = SentinelDaemon::new(config).await?;
@@ -33,5 +70,48 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn start_probe_endpoint() {
+    use tokio::net::TcpListener;
+    use std::io::Write;
+    
+    let addr = "127.0.0.1:9999";
+    let listener = match TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            error!("Failed to bind probe endpoint: {}", e);
+            return;
+        }
+    };
+
+    info!("📊 Telemetry probe endpoint started on http://{}", addr);
+
+    loop {
+        match listener.accept().await {
+            Ok((mut stream, _)) => {
+                tokio::spawn(async move {
+                    // Simple HTTP response
+                    let summary = serde_json::json!({
+                        "status": "running",
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                        "version": "0.1.0",
+                    });
+
+                    let json = serde_json::to_string_pretty(&summary).unwrap();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                        json.len(),
+                        json
+                    );
+
+                    let _ = stream.write_all(response.as_bytes()).await;
+                });
+            }
+            Err(e) => {
+                error!("Probe endpoint error: {}", e);
+            }
+        }
+    }
 }
 

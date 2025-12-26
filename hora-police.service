@@ -6,22 +6,22 @@ After=network.target
 Type=simple
 User=root
 ExecStart=/usr/local/bin/hora-police /etc/hora-police/config.toml
-Restart=always
+Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
+# Resource limits
+CPUQuota=10%
+MemoryMax=128M
+TasksMax=512
+
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/var/lib/hora-police
-
-# Resource limits
-LimitNOFILE=65536
-MemoryMax=100M
-CPUQuota=10%
+ReadWritePaths=/var/lib/hora-police /etc/hora-police
 
 [Install]
 WantedBy=multi-user.target

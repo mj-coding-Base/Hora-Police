@@ -1,0 +1,104 @@
+# Hora-Police Configuration for Hostinger KVM4 VPS
+# Optimized for Next.js and Nest.js applications
+
+# Auto-tune enabled - will detect vCPU and RAM automatically
+[auto_tune]
+enabled = true
+# Override if auto-detection fails
+# vcpu_override = 4
+# ram_override_mb = 8192
+
+# Safety first - start in audit mode
+dry_run = true
+audit_only = true
+canary_mode = false
+auto_kill = false
+aggressive_cleanup = false
+
+# Deploy grace period (minutes)
+# Processes in directories with recent git/npm activity will not be killed
+deploy_grace_minutes = 10
+
+# High confidence threshold for systemd/pm2 escalation
+# Processes managed by systemd/pm2 require this confidence level to be stopped
+high_confidence_threshold = 0.95
+
+# CPU monitoring threshold (will be auto-tuned based on vCPU count)
+cpu_threshold = 20.0
+
+# Duration in minutes before flagging a process
+duration_minutes = 5
+
+# Enable real-time Telegram alerts (disabled by default to reduce noise)
+real_time_alerts = false
+
+# Automatically kill processes that exceed threat threshold
+# Set to false initially, enable after canary period
+auto_kill = false
+
+# Enable learning mode (builds intelligence from past actions)
+learning_mode = true
+
+# Path to SQLite intelligence database
+database_path = "/var/lib/hora-police/intelligence.db"
+
+# Polling interval in milliseconds (will be auto-tuned based on load)
+polling_interval_ms = 5000
+
+# Threat confidence threshold (0.0-1.0) - processes above this will be killed
+threat_confidence_threshold = 0.7
+
+# Whitelist configuration
+[whitelist]
+# Automatically detect and whitelist PM2 apps, systemd units, Nginx upstreams, and package.json apps
+auto_detect = true
+# Manual patterns to whitelist (regex)
+manual_patterns = [
+    "^next$",
+    "^nest$",
+    "node.*dist/main.js",
+    "next start",
+    "nest start",
+]
+
+# Telegram configuration (pre-filled for @mjpavithra)
+[telegram]
+bot_token = "YOUR_BOT_TOKEN_HERE"
+chat_id = "@mjpavithra"
+daily_report_time = "09:00"
+# Enable real-time alerts after canary period
+real_time_alerts = false
+
+# File-based malware scanning configuration
+[file_scanning]
+# Enable file system malware scanning
+enabled = true
+
+# How often to scan for malware files (in minutes)
+scan_interval_minutes = 15
+
+# Directories to scan for malware files
+scan_paths = [
+    "/home",
+    "/tmp",
+    "/var/tmp",
+    "/var/www",
+    "/srv",
+]
+
+# Directory where quarantined files will be stored
+quarantine_path = "/var/lib/hora-police/quarantine"
+
+# Automatically delete malware files instead of quarantining
+# WARNING: This permanently deletes files. Use with caution!
+# Set to false initially, enable after canary period
+auto_delete = false
+
+# Kill processes that are using detected malware files
+kill_processes_using_file = true
+
+# Aggressively delete malware origins (parent directories, related files, cron jobs)
+# WARNING: This will permanently delete directories and files with admin authority!
+# Set to false initially, enable after canary period
+aggressive_cleanup = false
+

@@ -25,6 +25,10 @@ sha2 = "0.10"
 hex = "0.4"
 walkdir = "2"
 regex = "1.10"
+inotify = "0.10"
+clap = { version = "4.0", features = ["derive"] }
+hmac = "0.12"
+rand = "0.8"
 
 [profile.release]
 opt-level = 3

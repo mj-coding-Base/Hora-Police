@@ -27,6 +27,18 @@ impl CpuAnalyzer {
         }
     }
 
+    pub fn new_with_environment(
+        base_threshold: f32,
+        base_duration_minutes: u64,
+        env: &crate::environment::SystemEnvironment,
+        vcpu_override: Option<usize>,
+    ) -> Self {
+        let threshold = env.compute_cpu_threshold(base_threshold, vcpu_override);
+        let duration_minutes = env.compute_duration_minutes(base_duration_minutes);
+        
+        Self::new(threshold, duration_minutes)
+    }
+
     pub fn analyze(&mut self, processes: &[ProcessInfo]) -> Vec<CpuAbuseDetection> {
         let now = Utc::now();
         let mut detections = Vec::new();

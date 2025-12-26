@@ -16,6 +16,14 @@ use crate::react_detector::ReactDetector;
 use crate::telegram::TelegramReporter;
 use crate::file_scanner::FileScanner;
 use crate::file_quarantine::FileQuarantine;
+use crate::environment::SystemEnvironment;
+use crate::pm2_integration::Pm2Integration;
+use crate::systemd_integration::SystemdIntegration;
+use crate::nginx_integration::NginxIntegration;
+use crate::whitelist::WhitelistManager;
+use crate::safe_kill::{SafeKillEngine, SafeKillConfig, KillActionType};
+use crate::deploy_detector::DeployDetector;
+use crate::file_watcher::FileWatcher;
 
 pub struct SentinelDaemon {
     config: Config,
@@ -26,15 +34,30 @@ pub struct SentinelDaemon {
     react_detector: ReactDetector,
     db: IntelligenceDB,
     intelligence: BehaviorIntelligence,
-    kill_engine: KillEngine,
+    kill_engine: KillEngine, // Keep for backward compatibility, but prefer safe_kill
+    safe_kill: Option<SafeKillEngine>,
     telegram: TelegramReporter,
     file_scanner: Option<FileScanner>,
     file_quarantine: Option<FileQuarantine>,
+    environment: SystemEnvironment,
+    pm2: Pm2Integration,
+    systemd: SystemdIntegration,
+    nginx: NginxIntegration,
+    whitelist: WhitelistManager,
+    deploy_detector: DeployDetector,
+    file_watcher: Option<FileWatcher>,
+    deploy_cleanup_counter: u64,
+    db_maintenance_counter: u64,
 }
 
 impl SentinelDaemon {
     pub async fn new(config: Config) -> Result<Self> {
-        info!("Initializing Sentinel daemon components...");
+        info!("Initializing Hora-Police daemon components...");
+
+        // Detect system environment and auto-tune
+        let environment = SystemEnvironment::detect()?;
+        info!("✅ System environment detected: {} vCPU, {}MB RAM", 
+              environment.vcpu_count, environment.total_ram_mb);
 
         // Initialize database
         let db_path = PathBuf::from(&config.database_path);
@@ -44,44 +67,100 @@ impl SentinelDaemon {
         let db = IntelligenceDB::new(&db_path).await?;
         info!("✅ Database initialized at: {}", config.database_path);
 
+        // Initialize integrations
+        let mut pm2 = Pm2Integration::new();
+        let mut systemd = SystemdIntegration::new();
+        let mut nginx = NginxIntegration::new();
+
+        // Build whitelist from environment
+        let whitelist = if config.whitelist.auto_detect {
+            WhitelistManager::build_from_environment(
+                &mut pm2,
+                &mut systemd,
+                &mut nginx,
+                &config.whitelist.manual_patterns,
+            )?
+        } else {
+            let mut wl = WhitelistManager::new();
+            for pattern in &config.whitelist.manual_patterns {
+                wl.add_manual_entry(pattern.clone());
+            }
+            wl
+        };
+        info!("✅ Whitelist initialized with {} entries", whitelist.get_entries().len());
+
         // Initialize components
         let monitor = ProcessMonitor::new();
-        let cpu_analyzer = CpuAnalyzer::new(config.cpu_threshold, config.duration_minutes);
+        
+        // Auto-tune CPU analyzer
+        let cpu_analyzer = if config.auto_tune.enabled {
+            CpuAnalyzer::new_with_environment(
+                config.cpu_threshold,
+                config.duration_minutes,
+                &environment,
+                config.auto_tune.vcpu_override,
+            )
+        } else {
+            CpuAnalyzer::new(config.cpu_threshold, config.duration_minutes)
+        };
+        
         let cron_watcher = CronWatcher::new();
         let npm_scanner = NpmScanner::new();
         let react_detector = ReactDetector::new();
         
         let intelligence = BehaviorIntelligence::new(db.clone(), config.learning_mode).await?;
+        
+        // Keep old kill engine for backward compatibility
         let kill_engine = KillEngine::new(
             db.clone(),
-            ProcessMonitor::new(), // Create new monitor for kill engine
+            ProcessMonitor::new(),
             config.auto_kill,
             config.threat_confidence_threshold,
         );
         
+        // Initialize safe kill engine
+        let safe_kill_config = SafeKillConfig::from(&config);
+        let safe_kill = Some(SafeKillEngine::new(
+            db.clone(),
+            pm2.clone(),
+            systemd.clone(),
+            nginx.clone(),
+            whitelist.clone(),
+            safe_kill_config,
+        ));
+        
         let telegram = TelegramReporter::new(config.telegram.clone(), db.clone());
+        
+        // Initialize deploy detector
+        let deploy_detector = DeployDetector::new(config.deploy_grace_minutes);
 
         // Initialize file scanner if enabled
-        let (file_scanner, file_quarantine) = if config.file_scanning.enabled {
+        let (file_scanner, file_quarantine, file_watcher) = if config.file_scanning.enabled {
             let scan_paths: Vec<PathBuf> = config.file_scanning.scan_paths
                 .iter()
                 .map(|p| PathBuf::from(p))
                 .collect();
             let quarantine_path = PathBuf::from(&config.file_scanning.quarantine_path);
             
-            let scanner = FileScanner::new(scan_paths, quarantine_path.clone());
+            let scanner = FileScanner::new(scan_paths.clone(), quarantine_path.clone());
             let quarantine = FileQuarantine::new_with_cleanup(
                 quarantine_path,
                 config.file_scanning.auto_delete,
                 config.file_scanning.aggressive_cleanup,
             );
             
+            // Initialize file watcher for efficient scanning
+            let watcher = FileWatcher::new(scan_paths.clone()).ok();
+            if watcher.is_some() {
+                info!("✅ File watcher initialized (inotify enabled)");
+            }
+            
             info!("✅ File scanner initialized (scanning {} paths)", 
                   config.file_scanning.scan_paths.len());
             
-            (Some(scanner), Some(quarantine))
+            (Some(scanner), Some(quarantine), watcher)
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         Ok(Self {
@@ -94,9 +173,19 @@ impl SentinelDaemon {
             db,
             intelligence,
             kill_engine,
+            safe_kill,
             telegram,
             file_scanner,
             file_quarantine,
+            environment,
+            pm2,
+            systemd,
+            nginx,
+            whitelist,
+            deploy_detector,
+            file_watcher,
+            deploy_cleanup_counter: 0,
+            db_maintenance_counter: 0,
         })
     }
 
@@ -172,6 +261,12 @@ impl SentinelDaemon {
                         continue;
                     }
 
+                    // Check deploy grace period
+                    if self.deploy_detector.should_suspend_kill(process) {
+                        info!("Suspending kill for PID {} due to recent deployment activity", process.pid);
+                        continue;
+                    }
+
                     // Calculate threat confidence
                     let confidence = match self.intelligence.analyze_process(
                         process,
@@ -235,14 +330,23 @@ impl SentinelDaemon {
                                 infection.package_name
                             );
 
-                            if let Err(e) = self.kill_engine.kill_process(
-                                process.pid,
-                                process.uid,
-                                &process.binary_path,
-                                &reason,
-                                adjusted_confidence,
-                            ).await {
-                                error!("Failed to kill process: {}", e);
+                            // Use safe kill engine if available
+                            if let Some(ref mut safe_kill) = self.safe_kill {
+                                let action = safe_kill.decide_action(process, adjusted_confidence).await;
+                                if let Err(e) = safe_kill.execute_action(action, process, &reason, adjusted_confidence).await {
+                                    error!("Failed to execute safe kill action: {}", e);
+                                }
+                            } else {
+                                // Fallback to old kill engine
+                                if let Err(e) = self.kill_engine.kill_process(
+                                    process.pid,
+                                    process.uid,
+                                    &process.binary_path,
+                                    &reason,
+                                    adjusted_confidence,
+                                ).await {
+                                    error!("Failed to kill process: {}", e);
+                                }
                             }
 
                             // Send real-time alert if enabled
@@ -271,14 +375,22 @@ impl SentinelDaemon {
                                 react_abuse.reasons.join(", ")
                             );
 
-                            if let Err(e) = self.kill_engine.kill_process(
-                                process.pid,
-                                process.uid,
-                                &process.binary_path,
-                                &reason,
-                                adjusted_confidence,
-                            ).await {
-                                error!("Failed to kill process: {}", e);
+                            // Use safe kill engine if available
+                            if let Some(ref mut safe_kill) = self.safe_kill {
+                                let action = safe_kill.decide_action(process, adjusted_confidence).await;
+                                if let Err(e) = safe_kill.execute_action(action, process, &reason, adjusted_confidence).await {
+                                    error!("Failed to execute safe kill action: {}", e);
+                                }
+                            } else {
+                                if let Err(e) = self.kill_engine.kill_process(
+                                    process.pid,
+                                    process.uid,
+                                    &process.binary_path,
+                                    &reason,
+                                    adjusted_confidence,
+                                ).await {
+                                    error!("Failed to kill process: {}", e);
+                                }
                             }
                         }
                     }
@@ -291,14 +403,39 @@ impl SentinelDaemon {
                             abuse.duration_seconds
                         );
 
-                        if let Err(e) = self.kill_engine.kill_process(
-                            process.pid,
-                            process.uid,
-                            &process.binary_path,
-                            &reason,
-                            confidence,
-                        ).await {
-                            error!("Failed to kill process: {}", e);
+                        // Use safe kill engine if available
+                        if let Some(ref mut safe_kill) = self.safe_kill {
+                            let action = safe_kill.decide_action(process, confidence).await;
+                            
+                            // Send notification if action is Notify
+                            if matches!(action, KillActionType::Notify) && self.config.real_time_alerts {
+                                if let Some(_) = &self.config.telegram {
+                                    let alert_msg = format!(
+                                        "Suspicious process detected (not killed due to safety policy):\n\nPID: {}\nBinary: {}\nCPU: {:.1}%\nDuration: {}s\nConfidence: {:.0}%",
+                                        process.pid,
+                                        process.binary_path,
+                                        abuse.cpu_percent,
+                                        abuse.duration_seconds,
+                                        confidence * 100.0
+                                    );
+                                    let _ = self.telegram.send_alert("Suspicious Process Detected", &alert_msg).await;
+                                }
+                            }
+                            
+                            if let Err(e) = safe_kill.execute_action(action, process, &reason, confidence).await {
+                                error!("Failed to execute safe kill action: {}", e);
+                            }
+                        } else {
+                            // Fallback to old kill engine
+                            if let Err(e) = self.kill_engine.kill_process(
+                                process.pid,
+                                process.uid,
+                                &process.binary_path,
+                                &reason,
+                                confidence,
+                            ).await {
+                                error!("Failed to kill process: {}", e);
+                            }
                         }
                     }
                 }
@@ -377,8 +514,21 @@ impl SentinelDaemon {
                                             }
                                         }
                                         
+                                        // Generate rollback manifest before cleanup
+                                        use crate::rollback::{RollbackManifest, RollbackAction, get_rollback_key};
+                                        
+                                        let mut rollback_manifest = RollbackManifest::new();
+                                        rollback_manifest.add_action(RollbackAction::RestoreFile {
+                                            from: format!("{}/{}", 
+                                                quarantine.get_quarantine_dir().display(),
+                                                malware.file_path.file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or("unknown")),
+                                            to: malware.file_path.to_string_lossy().to_string(),
+                                        });
+
                                         // Aggressively clean up malware origin (parent dirs, related files, cron jobs)
-                                        let origin_cleanup = if self.config.file_scanning.aggressive_cleanup {
+                                        let origin_cleanup = if self.config.file_scanning.aggressive_cleanup && !self.config.dry_run {
                                             match quarantine.delete_malware_origin(&malware.file_path) {
                                                 Ok(result) => {
                                                     if !result.is_empty() {
@@ -386,6 +536,18 @@ impl SentinelDaemon {
                                                               result.deleted_files.len(),
                                                               result.deleted_directories.len(),
                                                               result.cleaned_cron_jobs.len());
+                                                        
+                                                        // Add rollback actions for deleted files/dirs
+                                                        for file in &result.deleted_files {
+                                                            rollback_manifest.add_action(RollbackAction::RestoreFile {
+                                                                from: format!("{}/{}", 
+                                                                    quarantine.get_quarantine_dir().display(),
+                                                                    PathBuf::from(file).file_name()
+                                                                        .and_then(|n| n.to_str())
+                                                                        .unwrap_or("unknown")),
+                                                                to: file.clone(),
+                                                            });
+                                                        }
                                                     }
                                                     Some(result)
                                                 }
@@ -397,6 +559,28 @@ impl SentinelDaemon {
                                         } else {
                                             None
                                         };
+                                        
+                                        // Sign and save rollback manifest
+                                        if let Ok(key) = get_rollback_key() {
+                                            if let Err(e) = rollback_manifest.sign(&key) {
+                                                warn!("Failed to sign rollback manifest: {}", e);
+                                            }
+                                            
+                                            let manifest_path = PathBuf::from("/var/lib/hora-police/rollbacks")
+                                                .join(format!("malware_{}_{}.rollback",
+                                                    Utc::now().format("%Y%m%d_%H%M%S"),
+                                                    malware.file_path.file_name()
+                                                        .and_then(|n| n.to_str())
+                                                        .unwrap_or("unknown")));
+                                            
+                                            if let Some(parent) = manifest_path.parent() {
+                                                let _ = std::fs::create_dir_all(parent);
+                                            }
+                                            
+                                            if let Err(e) = rollback_manifest.save(&manifest_path) {
+                                                warn!("Failed to save rollback manifest: {}", e);
+                                            }
+                                        }
 
                                         // Quarantine or delete the file
                                         let action_result = match quarantine.handle_malware(&malware.file_path) {
@@ -483,8 +667,34 @@ impl SentinelDaemon {
                 }
             }
 
+            // Cleanup old deploy records periodically
+            self.deploy_cleanup_counter += 1;
+            if self.deploy_cleanup_counter >= 360 { // Every 30 minutes (360 * 5s)
+                self.deploy_cleanup_counter = 0;
+                self.deploy_detector.cleanup_old_records();
+            }
+
+            // Database retention and vacuum (daily)
+            self.db_maintenance_counter += 1;
+            if self.db_maintenance_counter >= 17280 { // Every 24 hours (17280 * 5s)
+                self.db_maintenance_counter = 0;
+                if let Err(e) = self.db.archive_old_records(30).await {
+                    warn!("Failed to archive old records: {}", e);
+                }
+                if let Err(e) = self.db.vacuum_database().await {
+                    warn!("Failed to vacuum database: {}", e);
+                }
+            }
+
+            // Auto-tune polling interval based on load
+            let polling_interval = if self.config.auto_tune.enabled {
+                self.environment.compute_polling_interval_ms(self.config.polling_interval_ms)
+            } else {
+                self.config.polling_interval_ms
+            };
+
             // Sleep before next iteration
-            sleep(Duration::from_millis(self.config.polling_interval_ms)).await;
+            sleep(Duration::from_millis(polling_interval)).await;
         }
     }
 }
