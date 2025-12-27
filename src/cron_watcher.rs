@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct CronJob {

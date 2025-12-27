@@ -15,6 +15,7 @@ pub struct SystemdUnit {
     pub service_file: PathBuf,
 }
 
+#[derive(Clone)]
 pub struct SystemdIntegration {
     units: Vec<SystemdUnit>,
     pid_to_unit: HashMap<i32, usize>, // pid -> index in units

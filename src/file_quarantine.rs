@@ -272,7 +272,7 @@ impl FileQuarantine {
         let malware_path_str = malware_path.to_string_lossy();
 
         // Check all cron locations
-        let cron_watcher = CronWatcher::new();
+        let mut cron_watcher = CronWatcher::new();
         if let Ok(jobs) = cron_watcher.scan_all() {
             for job in jobs {
                 // Check if cron job references the malware file

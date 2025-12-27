@@ -279,7 +279,7 @@ impl IntelligenceDB {
 
     pub async fn upsert_suspicious_process(&self, process: &SuspiciousProcess) -> Result<()> {
         // Check if process with same binary_path exists
-        let existing: Option<(i64, i32, DateTime<Utc>)> = sqlx::query_as(
+        let existing = sqlx::query(
             r#"
             SELECT id, spawn_count, first_seen
             FROM suspicious_processes
@@ -289,15 +289,16 @@ impl IntelligenceDB {
         )
         .bind(&process.binary_path)
         .bind(process.pid)
-        .try_map(|row: sqlx::sqlite::SqliteRow| {
-            Ok((
-                row.get(0),
-                row.get(1),
-                row.get(2),
-            ))
-        })
         .fetch_optional(&*self.pool)
         .await?;
+        
+        let existing: Option<(i64, i32, DateTime<Utc>)> = existing.map(|row| {
+            (
+                row.get::<i64, _>(0),
+                row.get::<i32, _>(1),
+                row.get::<DateTime<Utc>, _>(2),
+            )
+        });
 
         if let Some((id, old_spawn_count, first_seen)) = existing {
             // Update existing record
@@ -370,7 +371,7 @@ impl IntelligenceDB {
                 binary_path: row.get(3),
                 command_line: row.get(4),
                 cpu_percent: row.get(5),
-                duration_seconds: row.get(6) as u64,
+                duration_seconds: row.get::<i64, _>(6) as u64,
                 threat_confidence: row.get(7),
                 first_seen: row.get(8),
                 last_seen: row.get(9),
@@ -539,5 +540,40 @@ pub struct DailySummary {
     pub npm_infections: u64,
     pub malware_files: u64,
     pub recent_kills: Vec<KillAction>,
+}
+
+impl IntelligenceDB {
+    /// Archive old records (older than specified days)
+    pub async fn archive_old_records(&self, days: u64) -> Result<()> {
+        let cutoff = Utc::now() - chrono::Duration::days(days as i64);
+        
+        // Delete old process history
+        sqlx::query("DELETE FROM process_history WHERE timestamp < ?")
+            .bind(cutoff)
+            .execute(&*self.pool)
+            .await?;
+        
+        // Delete old suspicious processes (keep recent ones)
+        sqlx::query("DELETE FROM suspicious_processes WHERE last_seen < ?")
+            .bind(cutoff)
+            .execute(&*self.pool)
+            .await?;
+        
+        // Delete old cron snapshots
+        sqlx::query("DELETE FROM cron_snapshots WHERE detected_at < ?")
+            .bind(cutoff)
+            .execute(&*self.pool)
+            .await?;
+        
+        Ok(())
+    }
+
+    /// Vacuum database to reclaim space
+    pub async fn vacuum_database(&self) -> Result<()> {
+        sqlx::query("VACUUM")
+            .execute(&*self.pool)
+            .await?;
+        Ok(())
+    }
 }
 

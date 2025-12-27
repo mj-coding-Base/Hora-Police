@@ -30,6 +30,7 @@ struct Pm2Env {
     username: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct Pm2Integration {
     apps: Vec<Pm2App>,
     pid_to_app: HashMap<i32, usize>, // pid -> index in apps
@@ -201,8 +202,8 @@ impl Pm2Integration {
                                         .to_string();
                                     
                                     let path = process.cwd()
-                                        .unwrap_or_else(|| &PathBuf::from("/"))
-                                        .to_path_buf();
+                                        .map(|p| p.to_path_buf())
+                                        .unwrap_or_else(|| PathBuf::from("/"));
 
                                     apps.push(Pm2App {
                                         name,

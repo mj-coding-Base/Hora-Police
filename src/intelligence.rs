@@ -45,7 +45,7 @@ impl BehaviorIntelligence {
         }
 
         // New process - calculate initial confidence
-        let mut confidence = 0.0;
+        let mut confidence: f32 = 0.0;
 
         // Base confidence from CPU abuse
         if cpu_percent > 30.0 {

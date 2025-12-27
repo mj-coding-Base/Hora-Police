@@ -24,6 +24,7 @@ use crate::whitelist::WhitelistManager;
 use crate::safe_kill::{SafeKillEngine, SafeKillConfig, KillActionType};
 use crate::deploy_detector::DeployDetector;
 use crate::file_watcher::FileWatcher;
+use crate::zombie_reaper::ZombieReaper;
 use sd_notify::NotifyState;
 
 pub struct SentinelDaemon {

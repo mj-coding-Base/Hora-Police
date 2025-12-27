@@ -13,6 +13,7 @@ pub struct NginxUpstream {
     pub host: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct NginxIntegration {
     upstreams: Vec<NginxUpstream>,
     port_to_pid: HashMap<u16, Vec<i32>>,
@@ -101,13 +102,13 @@ impl NginxIntegration {
                 let server_addr = server_cap.get(1).unwrap().as_str().trim();
                 
                 // Parse address (host:port or just :port)
-                let (host, port) = if server_addr.starts_with(':') {
+                let (host, port): (Option<String>, &str) = if server_addr.starts_with(':') {
                     (None, server_addr.strip_prefix(':').unwrap_or("0"))
                 } else if server_addr.contains(':') {
                     let parts: Vec<&str> = server_addr.split(':').collect();
                     (Some(parts[0].to_string()), parts.get(1).unwrap_or(&"0"))
                 } else {
-                    (None, &server_addr[..])
+                    (None, "0")
                 };
 
                 if let Ok(port_num) = port.parse::<u16>() {

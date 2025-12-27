@@ -26,6 +26,7 @@ pub enum WhitelistSource {
     Manual,
 }
 
+#[derive(Clone)]
 pub struct WhitelistManager {
     entries: Vec<WhitelistEntry>,
     compiled_patterns: Vec<Regex>,
@@ -72,8 +73,9 @@ impl WhitelistManager {
                 // Generate fingerprint from package.json if exists
                 if let Some(pkg_json) = manager.find_package_json(&app.path) {
                     if let Ok(fingerprint) = manager.fingerprint_file(&pkg_json) {
+                        let path_pattern = app.path.to_string_lossy();
                         manager.add_entry(WhitelistEntry {
-                            pattern: format!("^{}", regex::escape(path_str.unwrap_or(""))),
+                            pattern: format!("^{}", regex::escape(&path_pattern)),
                             source: WhitelistSource::Pm2App,
                             fingerprint: Some(fingerprint),
                         });
