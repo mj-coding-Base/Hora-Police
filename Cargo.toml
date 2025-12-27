@@ -38,3 +38,10 @@ opt-level = "z"  # Size-optimized (use "3" if you favor speed)
 panic = "abort"
 strip = "debuginfo"
 
+# Low-memory build profile (for systems with limited RAM)
+[profile.lowmem]
+inherits = "release"
+lto = false  # Disable LTO to reduce memory usage
+codegen-units = 16  # More units = less memory per unit
+opt-level = 2  # Lower optimization = less memory
+

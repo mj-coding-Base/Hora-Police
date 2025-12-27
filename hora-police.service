@@ -18,7 +18,7 @@ TasksMax=1024
 
 # Security hardening
 NoNewPrivileges=true
-PrivateTmp=true
+# PrivateTmp removed - was causing mount namespace issues
 ProtectSystem=full
 ProtectHome=true
 # Allow read access to /proc and /sys for process monitoring
