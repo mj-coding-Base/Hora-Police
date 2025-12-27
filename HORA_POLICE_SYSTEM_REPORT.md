@@ -1,8 +1,9 @@
 # 🛡️ Hora-Police Anti-Malware System - Complete System Report
 
 **Version**: 0.1.0  
-**Last Updated**: December 2024  
-**Status**: Production Ready
+**Last Updated**: December 27, 2025  
+**Status**: Production Ready  
+**Version**: 0.1.0 (with VPS deployment fixes)
 
 ---
 
@@ -73,12 +74,13 @@ Hora-Police operates as a continuous monitoring system that:
 ### Technology Stack
 
 - **Runtime**: Tokio (async runtime)
-- **Database**: SQLite (intelligence store)
+- **Database**: SQLite (intelligence store, WAL mode enabled)
 - **Process Monitoring**: sysinfo crate
 - **Configuration**: TOML format
 - **Reporting**: Telegram Bot API
-- **Service Management**: systemd
+- **Service Management**: systemd (with tmpfiles.d integration)
 - **Language**: Rust 1.70+
+- **File Monitoring**: inotify (optional, for real-time file watching)
 
 ---
 
@@ -795,6 +797,27 @@ WHERE timestamp > datetime('now', '-1 day');
 - Rust 1.70+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
 - Root/sudo access
 - SQLite3 development libraries: `sudo apt-get install libsqlite3-dev`
+- Minimum 2GB RAM for building (4GB+ recommended)
+- systemd (for service management)
+
+### Quick Deployment
+
+For automated deployment, use the provided script:
+
+```bash
+cd /srv/Hora-Police
+chmod +x deploy-vps.sh
+./deploy-vps.sh
+```
+
+This script handles:
+- Rust installation and setup
+- Dependency installation
+- Building the optimized binary
+- Creating all required directories
+- Installing tmpfiles.d configuration
+- Setting up systemd service
+- Starting and verifying the service
 
 ### Installation Steps
 
@@ -825,15 +848,27 @@ WHERE timestamp > datetime('now', '-1 day');
 
 5. **Setup Directories**:
    ```bash
-   sudo mkdir -p /etc/hora-police /var/lib/hora-police /var/lib/hora-police/quarantine
+   sudo mkdir -p /etc/hora-police
+   sudo mkdir -p /var/lib/hora-police
+   sudo mkdir -p /var/lib/hora-police/quarantine
+   sudo mkdir -p /var/log/hora-police
    sudo cp config.toml.example /etc/hora-police/config.toml
-   sudo chown -R root:root /etc/hora-police /var/lib/hora-police
+   sudo chown -R root:root /etc/hora-police /var/lib/hora-police /var/log/hora-police
    sudo chmod 644 /etc/hora-police/config.toml
+   sudo chmod 755 /etc/hora-police
    sudo chmod 755 /var/lib/hora-police
    sudo chmod 700 /var/lib/hora-police/quarantine
+   sudo chmod 755 /var/log/hora-police
    ```
 
-6. **Install Service**:
+6. **Install tmpfiles.d Configuration** (Optional but recommended):
+   ```bash
+   sudo cp etc/tmpfiles.d/hora-police.conf /etc/tmpfiles.d/
+   sudo systemd-tmpfiles --create /etc/tmpfiles.d/hora-police.conf
+   ```
+   This ensures all required directories are automatically created on system boot.
+
+7. **Install Service**:
    ```bash
    sudo cp hora-police.service /etc/systemd/system/
    sudo systemctl daemon-reload
@@ -841,7 +876,7 @@ WHERE timestamp > datetime('now', '-1 day');
    sudo systemctl start hora-police
    ```
 
-7. **Verify Installation**:
+8. **Verify Installation**:
    ```bash
    sudo systemctl status hora-police
    sudo journalctl -u hora-police -f
@@ -997,13 +1032,26 @@ See `HEALTH_CHECK.md` for a comprehensive health check script.
 
 ### systemd Security Options
 
+The service file includes security hardening options:
+
 ```ini
+Type=simple
+User=root
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/var/lib/hora-police
+ReadOnlyPaths=/proc /sys
+ReadWritePaths=/var/lib/hora-police /etc/hora-police /var/log/hora-police
+CPUQuota=15%
+MemoryMax=128M
+TasksMax=1024
 ```
+
+**Important Notes**:
+- `PrivateTmp` was removed to avoid mount namespace issues
+- `ProtectSystem=full` allows read access to `/proc` and `/sys` for process monitoring
+- All directories in `ReadWritePaths` must exist before service start
+- Use `tmpfiles.d` configuration to ensure directories are created on boot
 
 ### Threat Model
 
@@ -1043,6 +1091,40 @@ sudo /usr/local/bin/hora-police /etc/hora-police/config.toml
 # Check permissions
 ls -la /var/lib/hora-police/
 sudo chown root:root /var/lib/hora-police/
+```
+
+#### Service Fails with NAMESPACE Error
+
+If you see `status=226/NAMESPACE` or `Failed to set up mount namespacing`, the required directories don't exist:
+
+```bash
+# Create all required directories
+sudo mkdir -p /etc/hora-police
+sudo mkdir -p /var/lib/hora-police
+sudo mkdir -p /var/lib/hora-police/quarantine
+sudo mkdir -p /var/log/hora-police
+
+# Set proper permissions
+sudo chown -R root:root /etc/hora-police /var/lib/hora-police /var/log/hora-police
+sudo chmod 755 /etc/hora-police
+sudo chmod 755 /var/lib/hora-police
+sudo chmod 700 /var/lib/hora-police/quarantine
+sudo chmod 755 /var/log/hora-police
+
+# Install tmpfiles.d to ensure directories exist on boot
+sudo cp etc/tmpfiles.d/hora-police.conf /etc/tmpfiles.d/
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/hora-police.conf
+
+# Reload and restart
+sudo systemctl daemon-reload
+sudo systemctl restart hora-police
+```
+
+**Quick Fix Script**: Use `fix-service-directories.sh` for automated fix:
+```bash
+cd /srv/Hora-Police
+chmod +x fix-service-directories.sh
+./fix-service-directories.sh
 ```
 
 #### No Detections
@@ -1112,6 +1194,21 @@ sudo apt-get install -y build-essential libsqlite3-dev pkg-config
 # Clean and rebuild
 cargo clean
 cargo build --release
+```
+
+#### Out of Memory (OOM) During Build
+
+If build process is killed with `signal: 9, SIGKILL`, reduce parallel jobs:
+
+```bash
+# Build with single job (slower but uses less memory)
+cargo build --release -j1
+
+# Or disable LTO for lower memory usage
+RUSTFLAGS="-C opt-level=3" cargo build --release -j1
+
+# Alternative: Build on more powerful machine and transfer binary
+# See BUILD_ALTERNATIVES.md for remote build options
 ```
 
 ---
@@ -1255,9 +1352,18 @@ Hora-Police is a comprehensive, high-performance anti-malware system designed fo
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: December 2024  
+**Document Version**: 1.1  
+**Last Updated**: December 27, 2025  
 **Maintained By**: Hora-Police Development Team
+
+### Recent Updates (v1.1)
+
+- **Fixed**: Service NAMESPACE error by ensuring `/var/log/hora-police` directory exists
+- **Added**: tmpfiles.d configuration for automatic directory creation on boot
+- **Improved**: Deployment script with comprehensive directory setup
+- **Updated**: Troubleshooting section with NAMESPACE error resolution
+- **Enhanced**: systemd security configuration documentation
+- **Added**: OOM build error troubleshooting guidance
 
 ---
 

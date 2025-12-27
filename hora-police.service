@@ -1,32 +1,26 @@
 [Unit]
 Description=Hora-Police Anti-Malware Daemon
 After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=root
 ExecStart=/usr/local/bin/hora-police /etc/hora-police/config.toml
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
-
-# Resource limits (safe defaults for KVM4)
 CPUQuota=15%
 MemoryMax=128M
 TasksMax=1024
-
-# Security hardening
 NoNewPrivileges=true
-# PrivateTmp removed - was causing mount namespace issues
-ProtectSystem=full
+PrivateTmp=false
+ProtectSystem=strict
 ProtectHome=true
-# Allow read access to /proc and /sys for process monitoring
 ReadOnlyPaths=/proc /sys
 ReadWritePaths=/var/lib/hora-police /etc/hora-police /var/log/hora-police
-# Optional: for fanotify (use sparingly)
-# AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
-
 
 [Install]
 WantedBy=multi-user.target
