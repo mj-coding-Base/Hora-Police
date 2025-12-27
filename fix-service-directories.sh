@@ -50,19 +50,73 @@ if [ ! -f "${CONFIG}" ]; then
 fi
 
 # 6. Validate service unit path & binary
+echo ""
+echo "=== Binary Validation ==="
 if [ -f "${BINARY}" ]; then
   echo "✅ Binary found: ${BINARY}"
+  echo ""
   echo "=== Binary details ==="
   ls -l "${BINARY}" || true
-  file "${BINARY}" || true
+  FILE_INFO=$(file "${BINARY}" 2>&1 || echo "file command failed")
+  echo "${FILE_INFO}"
+  
+  # Check if it's a valid ELF binary
+  if ! echo "${FILE_INFO}" | grep -q "ELF"; then
+    echo ""
+    echo "❌ ERROR: ${BINARY} is NOT a valid ELF executable"
+    echo "Binary may be corrupted or wrong file type"
+    echo ""
+    echo "REMEDIATION: Rebuild and copy binary again"
+    echo "  See: REMEDIATION_BINARY_MISSING.md or run: ./copy-binary-from-wsl.sh"
+    exit 2
+  fi
+  
+  # Check architecture
+  if echo "${FILE_INFO}" | grep -q "x86-64"; then
+    echo "✅ Architecture: x86-64 (correct)"
+  elif echo "${FILE_INFO}" | grep -q "ARM"; then
+    echo ""
+    echo "❌ ERROR: Binary is ARM architecture but system is x86_64"
+    echo "REMEDIATION: Rebuild for x86_64 target"
+    exit 2
+  fi
+  
+  echo ""
   echo "=== Binary dependencies ==="
-  ldd "${BINARY}" 2>&1 || echo "ldd failed (static binary or missing deps)"
+  if ldd "${BINARY}" >/dev/null 2>&1; then
+    ldd "${BINARY}" || true
+    MISSING_DEPS=$(ldd "${BINARY}" 2>&1 | grep "not found" || true)
+    if [ -n "${MISSING_DEPS}" ]; then
+      echo ""
+      echo "❌ ERROR: Missing shared library dependencies:"
+      echo "${MISSING_DEPS}"
+      echo ""
+      echo "REMEDIATION: Install missing libraries or use statically linked binary"
+      exit 2
+    fi
+    echo "✅ All dependencies available"
+  else
+    echo "Binary appears to be statically linked (OK)"
+  fi
+  
+  # Ensure executable permission
   sudo chmod +x "${BINARY}" || true
+  PERMS=$(stat -c "%a" "${BINARY}" 2>/dev/null || stat -f "%OLp" "${BINARY}" 2>/dev/null || echo "unknown")
+  echo "Permissions: ${PERMS}"
+  
+  echo ""
   echo "=== Testing binary execution ==="
   if sudo "${BINARY}" --help >/dev/null 2>&1; then
-    echo "✅ Binary is executable"
+    echo "✅ Binary executes successfully (--help works)"
+  elif sudo "${BINARY}" --version >/dev/null 2>&1; then
+    echo "✅ Binary executes successfully (--version works)"
   else
-    echo "⚠️  Binary exists but --help test failed (may need config file)"
+    echo "⚠️  Binary execution test failed"
+    echo "Attempting to see error:"
+    sudo "${BINARY}" 2>&1 | head -3 || true
+    echo ""
+    echo "⚠️  WARNING: Binary exists but execution test failed"
+    echo "This may cause 203/EXEC errors. Continuing anyway..."
   fi
 else
   echo "❌ ERROR: binary ${BINARY} not found."
@@ -70,15 +124,14 @@ else
   echo "=== REMEDIATION REQUIRED ==="
   echo "Please copy a prebuilt Linux x86_64 binary to ${BINARY}"
   echo ""
-  echo "Option 1: From local machine (WSL/Linux):"
-  echo "  scp target/release/hora-police deploy@$(hostname -I | awk '{print $1}'):/tmp/"
-  echo "  ssh deploy@$(hostname -I | awk '{print $1}') 'sudo mv /tmp/hora-police ${BINARY} && sudo chmod +x ${BINARY}'"
+  echo "Option 1: From WSL (Recommended):"
+  echo "  cd /mnt/f/Personal_Projects/Hora-Police"
+  echo "  cargo build --release"
+  echo "  scp target/release/hora-police deploy@62.72.13.136:/tmp/"
+  echo "  ssh deploy@62.72.13.136 'sudo mv /tmp/hora-police ${BINARY} && sudo chmod +x ${BINARY}'"
   echo ""
-  echo "Option 2: From Windows (if binary built in WSL):"
-  echo "  # In WSL:"
-  echo "  scp /mnt/f/Personal_Projects/Hora-Police/target/release/hora-police deploy@<VPS_IP>:/tmp/"
-  echo "  # Then on VPS:"
-  echo "  sudo mv /tmp/hora-police ${BINARY} && sudo chmod +x ${BINARY}"
+  echo "Option 2: Use copy script from WSL:"
+  echo "  ./copy-binary-from-wsl.sh"
   echo ""
   echo "Option 3: Build on VPS (if memory allows):"
   echo "  cd ${REPO_DIR}"
@@ -148,10 +201,33 @@ sudo journalctl -u hora-police -n 120 --no-pager || true
 
 echo ""
 echo "=== Checking for errors ==="
-if sudo journalctl -u hora-police -n 200 --no-pager | grep -qiE 'NAMESPACE|EXEC|Failed.*EXEC|error.*226|error.*203'; then
+JOURNAL_ERRORS=$(sudo journalctl -u hora-police -n 200 --no-pager | grep -iE 'NAMESPACE|EXEC|Failed.*EXEC|error.*226|error.*203' || true)
+if [ -n "${JOURNAL_ERRORS}" ]; then
   echo "⚠️  WARNING: Found NAMESPACE or EXEC errors in journal"
   echo "=== Error details ==="
-  sudo journalctl -u hora-police -n 200 --no-pager | grep -iE 'NAMESPACE|EXEC|Failed.*EXEC|error.*226|error.*203' || true
+  echo "${JOURNAL_ERRORS}"
+  echo ""
+  
+  # Check specifically for 203/EXEC
+  if echo "${JOURNAL_ERRORS}" | grep -qi "203/EXEC\|status=203"; then
+    echo "❌ 203/EXEC error detected - binary execution failed"
+    echo ""
+    echo "=== Additional Diagnostics ==="
+    echo "Run diagnostic script for detailed analysis:"
+    echo "  ./diagnose-binary.sh"
+    echo ""
+    echo "Common causes:"
+    echo "  1. Binary missing or not executable"
+    echo "  2. Wrong architecture (ARM vs x86_64)"
+    echo "  3. Missing shared library dependencies"
+    echo "  4. Corrupted binary"
+    echo "  5. SELinux/AppArmor restrictions"
+    echo ""
+    echo "REMEDIATION:"
+    echo "  1. Run: ./diagnose-binary.sh"
+    echo "  2. If binary missing/wrong: ./copy-binary-from-wsl.sh (from WSL)"
+    echo "  3. Re-run this script after fixing binary"
+  fi
 else
   echo "✅ No NAMESPACE or EXEC errors found in recent journal"
 fi
