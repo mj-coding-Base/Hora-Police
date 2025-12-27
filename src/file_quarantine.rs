@@ -4,6 +4,8 @@ use std::fs;
 use chrono::Utc;
 use tracing::{info, warn, error};
 use walkdir::WalkDir;
+use nix::unistd::Pid;
+use nix::sys::signal;
 
 pub struct FileQuarantine {
     quarantine_dir: PathBuf,
@@ -101,9 +103,6 @@ impl FileQuarantine {
             if process.binary_path == file_path_str {
                 info!("🔪 Killing process PID {} using malicious file: {}", 
                       process.pid, file_path_str);
-                
-                use nix::sys::signal;
-                use nix::unistd::Pid;
                 
                 let pid_obj = Pid::from_raw(process.pid);
                 if signal::kill(pid_obj, signal::Signal::SIGTERM).is_ok() {

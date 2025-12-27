@@ -54,8 +54,11 @@ impl KillEngine {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 
                 // Check if process is still alive
-                let monitor = self.monitor.lock().await;
-                if monitor.get_process_by_pid(pid).is_some() {
+                let still_alive = {
+                    let monitor = self.monitor.lock().await;
+                    monitor.get_process_by_pid(pid).is_some()
+                };
+                if still_alive {
                     warn!("⚠️  Process {} still alive after SIGTERM, sending SIGKILL", pid);
                     let _ = signal::kill(pid_obj, signal::Signal::SIGKILL);
                 }
@@ -81,10 +84,13 @@ impl KillEngine {
 
         // Check for respawn
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        let mut monitor = self.monitor.lock().await;
-        monitor.refresh();
+        let respawned_info = {
+            let mut monitor = self.monitor.lock().await;
+            monitor.refresh();
+            monitor.get_process_by_pid(pid)
+        };
         
-        if let Some(respawned) = monitor.get_process_by_pid(pid) {
+        if let Some(respawned) = respawned_info {
             if respawned.binary_path == binary_path {
                 warn!("🔄 Process respawned! PID={}, escalating...", pid);
                 
