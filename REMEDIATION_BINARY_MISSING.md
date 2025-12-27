@@ -33,48 +33,43 @@ sudo /usr/local/bin/hora-police --help
 
 ## Solution: Copy Prebuilt Binary
 
-### Option 1: Use Automated Script (Recommended)
+### Option 1: Build on VPS (Recommended)
 
-**On your Windows machine (in WSL)**:
+**On VPS, run the automated build and fix script**:
 
 ```bash
-cd /mnt/f/Personal_Projects/Hora-Police
-chmod +x copy-binary-from-wsl.sh
-./copy-binary-from-wsl.sh
+cd /srv/Hora-Police
+git pull
+chmod +x build-and-fix-on-vps.sh
+./build-and-fix-on-vps.sh
 ```
 
 This script will:
-- Build the binary if needed
-- Copy it to VPS
+- Check/install Rust if needed
+- Build the binary on VPS
 - Install with correct permissions
-- Verify installation
+- Fix service configuration
+- Start and verify service
 
-### Option 2: Manual Copy from WSL
+### Option 2: Manual Build on VPS
 
-**On your Windows machine (in WSL)**:
-
-```bash
-# Navigate to project
-cd /mnt/f/Personal_Projects/Hora-Police
-
-# Build if not already built
-cargo build --release
-
-# Copy to VPS (replace with your VPS IP)
-scp target/release/hora-police deploy@62.72.13.136:/tmp/hora-police
-
-# On VPS, install binary
-ssh deploy@62.72.13.136 'sudo mv /tmp/hora-police /usr/local/bin/hora-police && sudo chmod +x /usr/local/bin/hora-police'
-```
-
-**Or in one step**:
+**On VPS**:
 
 ```bash
-# From WSL
-cd /mnt/f/Personal_Projects/Hora-Police
-cargo build --release
-scp target/release/hora-police deploy@62.72.13.136:/tmp/
-ssh deploy@62.72.13.136 'sudo mv /tmp/hora-police /usr/local/bin/hora-police && sudo chmod +x /usr/local/bin/hora-police && sudo systemctl restart hora-police'
+cd /srv/Hora-Police
+
+# Ensure Rust is installed
+source $HOME/.cargo/env || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Build with minimal memory
+RUSTFLAGS="-C opt-level=3" cargo build --release -j1
+
+# Install
+sudo cp target/release/hora-police /usr/local/bin/hora-police
+sudo chmod +x /usr/local/bin/hora-police
+
+# Fix service
+./fix-service-directories.sh
 ```
 
 ### Option 3: From Local Linux Machine
@@ -94,23 +89,7 @@ sudo chmod +x /usr/local/bin/hora-police
 sudo systemctl restart hora-police
 ```
 
-### Option 4: Build on VPS (If Memory Allows)
-
-**⚠️ WARNING**: This may fail with OOM on low-memory VPS instances.
-
-```bash
-# On VPS
-cd /srv/Hora-Police
-source $HOME/.cargo/env
-
-# Build with minimal memory usage
-RUSTFLAGS="-C opt-level=3" cargo build --release -j1
-
-# If successful, install
-sudo cp target/release/hora-police /usr/local/bin/hora-police
-sudo chmod +x /usr/local/bin/hora-police
-sudo systemctl restart hora-police
-```
+### Option 4: From CI/CD Artifact
 
 ### Option 4: From CI/CD Artifact
 

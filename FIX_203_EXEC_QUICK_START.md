@@ -1,11 +1,31 @@
 # Quick Start: Fix 203/EXEC Error
 
 ## Problem
-Service fails with `status=203/EXEC` - systemd cannot execute the binary.
+Service fails with `status=203/EXEC` - systemd cannot execute the binary (usually because binary is missing).
 
-## Solution (3 Steps)
+## Solution: Build on VPS (Single Command)
 
-### Step 1: Diagnose (On VPS)
+**On your VPS, run**:
+
+```bash
+cd /srv/Hora-Police
+git pull
+chmod +x build-and-fix-on-vps.sh
+./build-and-fix-on-vps.sh
+```
+
+This single script will:
+- ✅ Check/install Rust if needed
+- ✅ Create all required directories
+- ✅ Build the binary on VPS (10-20 minutes)
+- ✅ Install binary with correct permissions
+- ✅ Install tmpfiles.d configuration
+- ✅ Fix systemd unit file
+- ✅ Start and verify service
+
+## Alternative: Step-by-Step
+
+### Step 1: Diagnose (Optional)
 
 ```bash
 cd /srv/Hora-Police
@@ -16,33 +36,13 @@ chmod +x diagnose-binary.sh
 
 This will tell you exactly what's wrong with the binary.
 
-### Step 2: Copy Binary (From WSL on Windows)
-
-```bash
-cd /mnt/f/Personal_Projects/Hora-Police
-chmod +x copy-binary-from-wsl.sh
-./copy-binary-from-wsl.sh
-```
-
-This script will:
-- Build the binary if needed
-- Copy it to VPS (62.72.13.136)
-- Install with correct permissions
-- Verify installation
-
-### Step 3: Fix Service (On VPS)
+### Step 2: Build and Fix
 
 ```bash
 cd /srv/Hora-Police
-chmod +x fix-service-directories.sh
-./fix-service-directories.sh
+chmod +x build-and-fix-on-vps.sh
+./build-and-fix-on-vps.sh
 ```
-
-This will:
-- Create all required directories
-- Install tmpfiles.d config
-- Fix systemd unit file
-- Start and verify service
 
 ## Verification
 
@@ -65,20 +65,23 @@ sudo journalctl -u hora-police -n 50 --no-pager | grep -iE 'EXEC|error' || echo 
 
 ## Manual Alternative
 
-If scripts don't work, manual steps:
-
-**From WSL**:
-```bash
-cd /mnt/f/Personal_Projects/Hora-Police
-cargo build --release
-scp target/release/hora-police deploy@62.72.13.136:/tmp/
-```
+If the automated script doesn't work, manual steps:
 
 **On VPS**:
 ```bash
-sudo mv /tmp/hora-police /usr/local/bin/hora-police
-sudo chmod +x /usr/local/bin/hora-police
 cd /srv/Hora-Police
+
+# Install Rust if needed
+source $HOME/.cargo/env || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Build
+RUSTFLAGS="-C opt-level=3" cargo build --release -j1
+
+# Install
+sudo cp target/release/hora-police /usr/local/bin/hora-police
+sudo chmod +x /usr/local/bin/hora-police
+
+# Fix service
 ./fix-service-directories.sh
 ```
 
