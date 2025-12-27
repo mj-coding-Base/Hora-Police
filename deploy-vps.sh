@@ -140,6 +140,13 @@ $SUDO mkdir -p /var/lib/hora-police
 $SUDO mkdir -p /var/lib/hora-police/quarantine
 $SUDO mkdir -p /var/log/hora-police
 
+# Install tmpfiles.d configuration to ensure directories exist on boot
+if [ -f "$PROJECT_DIR/etc/tmpfiles.d/hora-police.conf" ]; then
+    $SUDO cp "$PROJECT_DIR/etc/tmpfiles.d/hora-police.conf" /etc/tmpfiles.d/
+    $SUDO systemd-tmpfiles --create /etc/tmpfiles.d/hora-police.conf 2>/dev/null || true
+    echo -e "${GREEN}✅ tmpfiles.d configuration installed${NC}"
+fi
+
 # Copy config if it doesn't exist
 if [ ! -f /etc/hora-police/config.toml ]; then
     if [ -f "$PROJECT_DIR/config.toml.example" ]; then
