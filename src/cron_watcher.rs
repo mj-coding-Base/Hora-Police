@@ -25,7 +25,7 @@ impl CronWatcher {
     pub fn new() -> Self {
         let suspicious_patterns = vec![
             // Base64 encoded commands
-            Regex::new(r"echo\s+['\"]?[A-Za-z0-9+/=]{50,}['\"]?\s*\||base64\s+-d").unwrap(),
+            Regex::new(r#"echo\s+['"]?[A-Za-z0-9+/=]{50,}['"]?\s*\||base64\s+-d"#).unwrap(),
             // curl | wget | bash patterns
             Regex::new(r"(curl|wget)\s+.*\s*\|\s*(bash|sh|zsh)").unwrap(),
             // npm install at runtime
