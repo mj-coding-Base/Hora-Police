@@ -50,7 +50,7 @@ impl ProcessMonitor {
             let command_line = process
                 .cmd()
                 .iter()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string())
                 .collect::<Vec<_>>()
                 .join(" ")
                 .chars()
@@ -58,7 +58,7 @@ impl ProcessMonitor {
                 .collect::<String>();
 
             // Get UID
-            let uid = process.user_id().copied().unwrap_or(0);
+            let uid = process.user_id().map(|u| u.as_raw()).unwrap_or(0);
 
             // Get PPID
             let ppid = process.parent()
@@ -92,14 +92,14 @@ impl ProcessMonitor {
             let command_line = process
                 .cmd()
                 .iter()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string())
                 .collect::<Vec<_>>()
                 .join(" ")
                 .chars()
                 .take(500)
                 .collect::<String>();
 
-            let uid = process.user_id().copied().unwrap_or(0);
+            let uid = process.user_id().map(|u| u.as_raw()).unwrap_or(0);
             let ppid = process.parent()
                 .map(|p| p.as_u32() as i32)
                 .unwrap_or(0);

@@ -134,7 +134,7 @@ impl SafeKillEngine {
     fn is_whitelisted_home_directory(&self, path: &Path) -> bool {
         // Check if path is in a whitelisted home directory
         // This is a simplified check - in production you might want more sophisticated logic
-        if let Some(components) = path.components().next() {
+        if path.components().next().is_some() {
             // Check against whitelist patterns
             let path_str = path.to_string_lossy();
             for entry in self.whitelist.get_entries() {
@@ -174,8 +174,9 @@ impl SafeKillEngine {
             }
             KillActionType::StopUnit => {
                 if let Some(unit) = self.systemd.get_unit_by_pid(process.pid) {
-                    info!("Stopping systemd unit: {} (PID: {})", unit.name, process.pid);
-                    self.systemd.stop_unit(&unit.name).await?;
+                    let unit_name = unit.name.clone();
+                    info!("Stopping systemd unit: {} (PID: {})", unit_name, process.pid);
+                    self.systemd.stop_unit(&unit_name).await?;
                     self.record_kill_action(process, reason, confidence).await?;
                     Ok(true)
                 } else {
@@ -185,8 +186,10 @@ impl SafeKillEngine {
             }
             KillActionType::StopPm2 => {
                 if let Some(app) = self.pm2.get_app_by_pid(process.pid) {
-                    info!("Stopping PM2 app: {} (PID: {})", app.name, process.pid);
-                    self.pm2.stop_app(&app.name, &app.user).await?;
+                    let app_name = app.name.clone();
+                    let app_user = app.user.clone();
+                    info!("Stopping PM2 app: {} (PID: {})", app_name, process.pid);
+                    self.pm2.stop_app(&app_name, &app_user).await?;
                     self.record_kill_action(process, reason, confidence).await?;
                     Ok(true)
                 } else {

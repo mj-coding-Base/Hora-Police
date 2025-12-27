@@ -201,7 +201,8 @@ impl Pm2Integration {
                                         .to_string();
                                     
                                     let path = process.cwd()
-                                        .unwrap_or_else(|| PathBuf::from("/"));
+                                        .unwrap_or_else(|| &PathBuf::from("/"))
+                                        .to_path_buf();
 
                                     apps.push(Pm2App {
                                         name,

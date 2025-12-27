@@ -81,7 +81,7 @@ impl BehaviorIntelligence {
             confidence += 0.2;
         }
 
-        Ok(confidence.min(1.0))
+        Ok(confidence.min(1.0f32))
     }
 
     pub async fn record_suspicious_process(

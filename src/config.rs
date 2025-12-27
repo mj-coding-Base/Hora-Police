@@ -101,7 +101,7 @@ pub struct TelegramConfig {
     pub daily_report_time: String, // HH:MM format
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AutoTuneConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -113,7 +113,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WhitelistConfig {
     #[serde(default = "default_true")]
     pub auto_detect: bool,

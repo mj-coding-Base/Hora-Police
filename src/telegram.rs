@@ -105,7 +105,7 @@ impl TelegramReporter {
                 let target = report_time;
                 
                 // Calculate time until next report
-                let mut wait_seconds = if now < target {
+                let wait_seconds = if now < target {
                     (target - now).num_seconds()
                 } else {
                     (target - now + chrono::Duration::days(1)).num_seconds()

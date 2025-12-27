@@ -118,7 +118,7 @@ impl FileQuarantine {
             }
 
             // Check if command line references the file
-            if process.command_line.contains(&file_path_str) {
+            if process.command_line.contains(&*file_path_str) {
                 info!("🔪 Killing process PID {} referencing malicious file: {}", 
                       process.pid, file_path_str);
                 
@@ -145,7 +145,11 @@ impl FileQuarantine {
     /// Aggressively clean up malware origin - delete parent directory and related files
     pub fn delete_malware_origin(&self, malware_path: &Path) -> Result<OriginCleanupResult> {
         if !self.aggressive_cleanup {
-            return Ok(OriginCleanupResult::Skipped);
+            return Ok(OriginCleanupResult {
+                deleted_files: Vec::new(),
+                deleted_directories: Vec::new(),
+                cleaned_cron_jobs: Vec::new(),
+            });
         }
 
         let mut cleanup_result = OriginCleanupResult {
@@ -272,7 +276,7 @@ impl FileQuarantine {
         if let Ok(jobs) = cron_watcher.scan_all() {
             for job in jobs {
                 // Check if cron job references the malware file
-                if job.content.contains(&malware_path_str) {
+                if job.content.contains(&*malware_path_str) {
                     info!("🗑️  Removing cron job referencing malware: {}", job.file_path);
                     
                     // Try to remove the cron entry

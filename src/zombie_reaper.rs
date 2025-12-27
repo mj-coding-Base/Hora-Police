@@ -143,7 +143,7 @@ impl ZombieReaper {
         // Log parent distribution
         if !stats.by_parent.is_empty() {
             let mut parent_counts: Vec<_> = stats.by_parent.iter().collect();
-            parent_counts.sort_by(|a, b| b.1.cmp(a.1));
+            parent_counts.sort_by(|a, b| b.1.cmp(&a.1));
             
             info!("Zombie distribution by parent:");
             for (ppid, count) in parent_counts.iter().take(10) {
@@ -171,7 +171,7 @@ impl ZombieReaper {
         let mut parent_counts: Vec<(i32, usize)> = stats.by_parent
             .into_iter()
             .collect();
-        parent_counts.sort_by(|a, b| b.1.cmp(a.1));
+        parent_counts.sort_by(|a, b| b.1.cmp(&a.1));
         parent_counts.truncate(limit);
         Ok(parent_counts)
     }

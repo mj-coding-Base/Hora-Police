@@ -77,10 +77,14 @@ impl SystemdIntegration {
             if unit.pid.is_none() {
                 if let Ok(pid) = Self::get_unit_pid(&unit.name) {
                     unit.pid = pid;
-                    if let Some(pid) = pid {
-                        pid_map.insert(pid, all_units.iter().position(|u| u.name == unit.name).unwrap());
-                    }
                 }
+            }
+        }
+        
+        // Build pid_map after updating all units
+        for (idx, unit) in all_units.iter().enumerate() {
+            if let Some(pid) = unit.pid {
+                pid_map.insert(pid, idx);
             }
         }
 

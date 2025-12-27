@@ -198,7 +198,7 @@ impl DeployDetector {
             ];
 
             for pattern in install_patterns {
-                if stdout.contains(pattern) && stdout.contains(&path_str) {
+                if stdout.contains(pattern) && stdout.contains(&*path_str) {
                     return true;
                 }
             }

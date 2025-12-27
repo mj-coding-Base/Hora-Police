@@ -107,7 +107,7 @@ impl NginxIntegration {
                     let parts: Vec<&str> = server_addr.split(':').collect();
                     (Some(parts[0].to_string()), parts.get(1).unwrap_or(&"0"))
                 } else {
-                    (None, server_addr)
+                    (None, &server_addr[..])
                 };
 
                 if let Ok(port_num) = port.parse::<u16>() {

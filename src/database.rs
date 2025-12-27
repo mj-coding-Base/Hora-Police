@@ -96,20 +96,20 @@ impl IntelligenceDB {
     async fn init_schema(&self) -> Result<()> {
         // Enable WAL mode for better performance
         sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         
         sqlx::query("PRAGMA synchronous = NORMAL")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         
         sqlx::query("PRAGMA temp_store = MEMORY")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         
         // Set cache size to ~80MB (20000 pages * 4KB)
         sqlx::query("PRAGMA cache_size = -20000")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         
         sqlx::query(
@@ -126,7 +126,7 @@ impl IntelligenceDB {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -136,7 +136,7 @@ impl IntelligenceDB {
             CREATE INDEX IF NOT EXISTS idx_process_uid ON process_history(uid);
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -158,7 +158,7 @@ impl IntelligenceDB {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -167,7 +167,7 @@ impl IntelligenceDB {
             CREATE INDEX IF NOT EXISTS idx_suspicious_confidence ON suspicious_processes(threat_confidence);
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -183,7 +183,7 @@ impl IntelligenceDB {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -199,7 +199,7 @@ impl IntelligenceDB {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -215,7 +215,7 @@ impl IntelligenceDB {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -223,7 +223,7 @@ impl IntelligenceDB {
             CREATE INDEX IF NOT EXISTS idx_kill_timestamp ON kill_actions(timestamp);
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -241,7 +241,7 @@ impl IntelligenceDB {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         sqlx::query(
@@ -251,7 +251,7 @@ impl IntelligenceDB {
             CREATE INDEX IF NOT EXISTS idx_malware_timestamp ON malware_files(detected_at);
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -271,7 +271,7 @@ impl IntelligenceDB {
         .bind(&record.command_line)
         .bind(record.cpu_percent)
         .bind(record.timestamp)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -296,7 +296,7 @@ impl IntelligenceDB {
                 row.get(2),
             ))
         })
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         if let Some((id, old_spawn_count, first_seen)) = existing {
@@ -316,7 +316,7 @@ impl IntelligenceDB {
             .bind(old_spawn_count + 1)
             .bind(process.restart_detected)
             .bind(id)
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         } else {
             // Insert new record
@@ -340,7 +340,7 @@ impl IntelligenceDB {
             .bind(process.last_seen)
             .bind(process.spawn_count)
             .bind(process.restart_detected)
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         }
 
@@ -359,7 +359,7 @@ impl IntelligenceDB {
             "#,
         )
         .bind(binary_path)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         if let Some(row) = row {
@@ -395,7 +395,7 @@ impl IntelligenceDB {
         .bind(&snapshot.user)
         .bind(snapshot.detected_at)
         .bind(snapshot.suspicious)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -414,7 +414,7 @@ impl IntelligenceDB {
         .bind(&infection.binary_path)
         .bind(infection.detected_at)
         .bind(infection.threat_level)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -433,7 +433,7 @@ impl IntelligenceDB {
         .bind(&action.reason)
         .bind(action.confidence)
         .bind(action.timestamp)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -455,7 +455,7 @@ impl IntelligenceDB {
         .bind(&malware.action_taken)
         .bind(&malware.quarantine_path)
         .bind(malware.detected_at)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -468,7 +468,7 @@ impl IntelligenceDB {
             "#,
         )
         .bind(since)
-        .fetch_one(&self.pool)
+        .fetch_one(&*self.pool)
         .await?;
 
         let suspicious_count: i64 = sqlx::query_scalar(
@@ -477,7 +477,7 @@ impl IntelligenceDB {
             "#,
         )
         .bind(since)
-        .fetch_one(&self.pool)
+        .fetch_one(&*self.pool)
         .await?;
 
         let npm_count: i64 = sqlx::query_scalar(
@@ -486,7 +486,16 @@ impl IntelligenceDB {
             "#,
         )
         .bind(since)
-        .fetch_one(&self.pool)
+        .fetch_one(&*self.pool)
+        .await?;
+
+        let malware_files_count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM malware_files WHERE detected_at >= ?
+            "#,
+        )
+        .bind(since)
+        .fetch_one(&*self.pool)
         .await?;
 
         let recent_kills: Vec<KillAction> = sqlx::query(
@@ -510,7 +519,7 @@ impl IntelligenceDB {
                 timestamp: row.get(5),
             })
         })
-        .fetch_all(&self.pool)
+        .fetch_all(&*self.pool)
         .await?;
 
         Ok(DailySummary {

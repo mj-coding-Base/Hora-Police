@@ -90,7 +90,7 @@ impl RollbackManifest {
         let mut script = String::from("#!/bin/bash\n");
         script.push_str("# Hora-Police Rollback Script\n");
         script.push_str(&format!("# Generated: {}\n", self.timestamp));
-        script.push_str("# Actions: {}\n\n", self.actions.len());
+        script.push_str(&format!("# Actions: {}\n\n", self.actions.len()));
         script.push_str("set -e\n\n");
 
         for (idx, action) in self.actions.iter().enumerate() {

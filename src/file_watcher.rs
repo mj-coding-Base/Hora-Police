@@ -28,7 +28,7 @@ impl FileWatcher {
                 // Add watches for all paths
                 for path in &paths {
                     if path.exists() {
-                        if let Err(e) = inotify.add_watch(path, WatchMask::CREATE | WatchMask::MODIFY | WatchMask::DELETE | WatchMask::MOVED_FROM | WatchMask::MOVED_TO) {
+                        if let Err(e) = inotify.watches().add(path, WatchMask::CREATE | WatchMask::MODIFY | WatchMask::DELETE | WatchMask::MOVED_FROM | WatchMask::MOVED_TO) {
                             warn!("Failed to add inotify watch for {}: {}", path.display(), e);
                         } else {
                             info!("Added inotify watch for: {}", path.display());
@@ -57,11 +57,19 @@ impl FileWatcher {
                 Ok(events) => {
                     let mut changed_dirs = self.changed_dirs.lock().await;
                     for event in events {
-                        if let Some(path) = event.path {
-                            // Get parent directory
-                            if let Some(parent) = path.parent() {
-                                changed_dirs.insert(parent.to_path_buf());
-                                changed.push(parent.to_path_buf());
+                        if let Some(name) = event.name {
+                            // Build full path from watch descriptor and name
+                            let watch_path = self.watch_paths.iter()
+                                .find(|p| p.exists())
+                                .cloned();
+                            
+                            if let Some(base_path) = watch_path {
+                                let full_path = base_path.join(name);
+                                // Get parent directory
+                                if let Some(parent) = full_path.parent() {
+                                    changed_dirs.insert(parent.to_path_buf());
+                                    changed.push(parent.to_path_buf());
+                                }
                             }
                         }
                     }
@@ -104,7 +112,7 @@ impl FileWatcher {
             if let Some(ref mut inotify) = self.inotify {
                 use inotify::WatchMask;
                 if path.exists() {
-                    inotify.add_watch(&path, WatchMask::CREATE | WatchMask::MODIFY | WatchMask::DELETE | WatchMask::MOVED_FROM | WatchMask::MOVED_TO)
+                    inotify.watches().add(&path, WatchMask::CREATE | WatchMask::MODIFY | WatchMask::DELETE | WatchMask::MOVED_FROM | WatchMask::MOVED_TO)
                         .with_context(|| format!("Failed to add watch for {}", path.display()))?;
                 }
             }
