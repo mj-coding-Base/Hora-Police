@@ -95,14 +95,36 @@ impl KillEngine {
                 warn!("🔄 Process respawned! PID={}, escalating...", pid);
                 
                 // Try to kill parent process
+                // Use tokio::spawn to avoid recursive async future size issues
                 if respawned.ppid > 0 {
-                    let _ = self.kill_process(
-                        respawned.ppid,
-                        respawned.uid,
-                        &format!("Parent of respawned process: {}", binary_path),
-                        "Process respawn detected",
-                        confidence + 0.1,
-                    ).await;
+                    let parent_pid = respawned.ppid;
+                    let parent_uid = respawned.uid;
+                    let parent_binary = format!("Parent of respawned process: {}", binary_path);
+                    let escalation_reason = "Process respawn detected".to_string();
+                    let escalation_confidence = confidence + 0.1;
+                    
+                    // Clone necessary data for spawned task
+                    let db_clone = self.db.clone();
+                    let monitor_clone = self.monitor.clone();
+                    let auto_kill = self.auto_kill;
+                    let threshold = self.threshold;
+                    
+                    // Spawn escalation as detached task (don't await to avoid infinite future size)
+                    tokio::spawn(async move {
+                        let mut escalation_engine = KillEngine {
+                            db: db_clone,
+                            monitor: monitor_clone,
+                            auto_kill,
+                            threshold,
+                        };
+                        let _ = escalation_engine.kill_process(
+                            parent_pid,
+                            parent_uid,
+                            &parent_binary,
+                            &escalation_reason,
+                            escalation_confidence,
+                        ).await;
+                    });
                 }
                 
                 return Ok(true);

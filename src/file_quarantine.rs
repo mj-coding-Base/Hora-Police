@@ -91,7 +91,7 @@ impl FileQuarantine {
     pub async fn kill_processes_using_file(&self, file_path: &Path) -> Result<Vec<i32>> {
         use crate::process_monitor::ProcessMonitor;
         
-        let monitor = ProcessMonitor::new();
+        let mut monitor = ProcessMonitor::new();
         monitor.refresh();
         
         let processes = monitor.get_all_processes()?;

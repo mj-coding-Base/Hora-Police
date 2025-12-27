@@ -83,3 +83,4 @@ sudo chmod +x /usr/local/bin/hora-police
 ./fix-service-directories.sh
 ```
 
+

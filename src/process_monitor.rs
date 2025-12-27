@@ -2,7 +2,14 @@ use anyhow::Result;
 use chrono::Utc;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use sysinfo::{Pid, System, Process, User};
+use sysinfo::{Pid, System, Process, User, Uid};
+
+/// Helper function to convert sysinfo Uid to u32
+/// sysinfo 0.30+ uses .as_() instead of .as_raw()
+/// See: https://docs.rs/sysinfo/latest/sysinfo/struct.Uid.html
+fn uid_to_u32(uid_opt: Option<&Uid>) -> u32 {
+    uid_opt.map(|u| u.as_()).unwrap_or(0u32)
+}
 
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
@@ -57,8 +64,8 @@ impl ProcessMonitor {
                 .take(500) // Limit length
                 .collect::<String>();
 
-            // Get UID
-            let uid = process.user_id().map(|u| u.as_raw()).unwrap_or(0u32);
+            // Get UID (using helper for sysinfo 0.30+ API compatibility)
+            let uid = uid_to_u32(process.user_id());
 
             // Get PPID
             let ppid = process.parent()
@@ -99,7 +106,7 @@ impl ProcessMonitor {
                 .take(500)
                 .collect::<String>();
 
-            let uid = process.user_id().map(|u| u.as_raw()).unwrap_or(0u32);
+            let uid = uid_to_u32(process.user_id());
             let ppid = process.parent()
                 .map(|p| p.as_u32() as i32)
                 .unwrap_or(0);
