@@ -3,7 +3,7 @@ Description=Hora-Police Anti-Malware Daemon
 After=network.target
 
 [Service]
-Type=notify
+Type=simple
 User=root
 ExecStart=/usr/local/bin/hora-police /etc/hora-police/config.toml
 Restart=on-failure
@@ -27,9 +27,6 @@ ReadWritePaths=/var/lib/hora-police /etc/hora-police /var/log/hora-police
 # Optional: for fanotify (use sparingly)
 # AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
 
-# Systemd watchdog
-WatchdogSec=30s
-NotifyAccess=all
 
 [Install]
 WantedBy=multi-user.target
