@@ -1,9 +1,9 @@
 # 🛡️ Hora-Police Anti-Malware System - Complete System Report
 
 **Version**: 0.1.0  
-**Last Updated**: December 27, 2025  
+**Last Updated**: December 28, 2025  
 **Status**: Production Ready  
-**Version**: 0.1.0 (with VPS deployment fixes)
+**Build**: Stable (with VPS deployment fixes and compile error resolutions)
 
 ---
 
@@ -43,7 +43,7 @@
 - **Language**: Rust (Edition 2021)
 - **Total Modules**: 15 source files
 - **Lines of Code**: ~3,500+ production-ready Rust
-- **Dependencies**: 15 crates
+- **Dependencies**: 16 crates (including num-traits for sysinfo 0.30+ compatibility)
 - **Database Tables**: 6 (with indexes)
 - **Performance**: <1% CPU, <40MB RAM
 - **Detection Methods**: 5+ different techniques
@@ -75,12 +75,13 @@ Hora-Police operates as a continuous monitoring system that:
 
 - **Runtime**: Tokio (async runtime)
 - **Database**: SQLite (intelligence store, WAL mode enabled)
-- **Process Monitoring**: sysinfo crate
+- **Process Monitoring**: sysinfo crate (v0.30+)
 - **Configuration**: TOML format
 - **Reporting**: Telegram Bot API
 - **Service Management**: systemd (with tmpfiles.d integration)
-- **Language**: Rust 1.70+
+- **Language**: Rust 1.92+ (Edition 2021)
 - **File Monitoring**: inotify (optional, for real-time file watching)
+- **Dependencies**: 16 crates (including num-traits for Uid conversion)
 
 ---
 
@@ -793,27 +794,40 @@ WHERE timestamp > datetime('now', '-1 day');
 
 ### Prerequisites
 
-- Ubuntu 20.04+ (or compatible Linux distribution)
-- Rust 1.70+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- Ubuntu 20.04+ (or compatible Linux distribution, tested on Ubuntu 24.04.2 LTS)
+- Rust 1.92+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
 - Root/sudo access
-- SQLite3 development libraries: `sudo apt-get install libsqlite3-dev`
-- Minimum 2GB RAM for building (4GB+ recommended)
+- Build dependencies: `build-essential`, `pkg-config`, `libssl-dev`, `libsqlite3-dev`
+- Minimum 2GB RAM for building (4GB+ recommended, or use swap space)
 - systemd (for service management)
+- C compiler (gcc/cc) for building Rust dependencies
 
 ### Quick Deployment
 
-For automated deployment, use the provided script:
+For automated deployment on VPS, use the provided scripts:
 
+**Option 1: Complete Build and Deploy (Recommended for VPS)**
+```bash
+cd /srv/Hora-Police
+git pull
+chmod +x install-build-deps.sh build-lowmem.sh scripts/install-binary.sh
+./install-build-deps.sh
+./build-lowmem.sh
+cp target/release/hora-police /tmp/hora-police
+./scripts/install-binary.sh
+```
+
+**Option 2: Automated Script (if available)**
 ```bash
 cd /srv/Hora-Police
 chmod +x deploy-vps.sh
 ./deploy-vps.sh
 ```
 
-This script handles:
+These scripts handle:
+- Build dependency installation (gcc, pkg-config, libssl-dev, etc.)
 - Rust installation and setup
-- Dependency installation
-- Building the optimized binary
+- Low-memory optimized build (single job, no LTO)
 - Creating all required directories
 - Installing tmpfiles.d configuration
 - Setting up systemd service
@@ -821,10 +835,17 @@ This script handles:
 
 ### Installation Steps
 
-1. **Install Dependencies**:
+1. **Install Build Dependencies**:
    ```bash
    sudo apt-get update
-   sudo apt-get install -y build-essential libsqlite3-dev pkg-config curl
+   sudo apt-get install -y build-essential libsqlite3-dev pkg-config libssl-dev ca-certificates curl
+   ```
+   
+   Or use the automated script:
+   ```bash
+   cd /srv/Hora-Police
+   chmod +x install-build-deps.sh
+   ./install-build-deps.sh
    ```
 
 2. **Install Rust**:
@@ -835,15 +856,61 @@ This script handles:
    ```
 
 3. **Build Application**:
+   
+   **For Low-Memory VPS (Recommended)**:
+   ```bash
+   cd /srv/Hora-Police
+   chmod +x build-lowmem.sh
+   ./build-lowmem.sh
+   ```
+   
+   This uses:
+   - Single job (`-j1`) to reduce memory usage
+   - Lower optimization (`opt-level=2`)
+   - No LTO to reduce memory pressure
+   - Deterministic builds (`--locked`)
+   
+   **For Standard Build**:
    ```bash
    cd /srv/Hora-Police
    cargo build --release
    ```
+   
+   **If Build Fails with OOM**:
+   ```bash
+   # Add swap space first
+   sudo fallocate -l 4G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   
+   # Then retry build
+   ./build-lowmem.sh
+   ```
 
 4. **Install Binary**:
+   
+   **Using Install Script (Recommended)**:
+   ```bash
+   cp target/release/hora-police /tmp/hora-police
+   chmod +x scripts/install-binary.sh
+   ./scripts/install-binary.sh
+   ```
+   
+   This script:
+   - Stops the service
+   - Copies binary with correct permissions
+   - Ensures all directories exist
+   - Installs tmpfiles.d configuration
+   - Reloads systemd
+   - Starts and verifies service
+   
+   **Manual Installation**:
    ```bash
    sudo cp target/release/hora-police /usr/local/bin/hora-police
    sudo chmod +x /usr/local/bin/hora-police
+   sudo chown root:root /usr/local/bin/hora-police
    ```
 
 5. **Setup Directories**:
@@ -1198,18 +1265,67 @@ cargo build --release
 
 #### Out of Memory (OOM) During Build
 
-If build process is killed with `signal: 9, SIGKILL`, reduce parallel jobs:
+If build process is killed with `signal: 9, SIGKILL`:
 
+**Solution 1: Add Swap Space (Recommended)**
 ```bash
-# Build with single job (slower but uses less memory)
-cargo build --release -j1
+# Add 4GB swap
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
-# Or disable LTO for lower memory usage
-RUSTFLAGS="-C opt-level=3" cargo build --release -j1
+# Verify swap is active
+free -h
 
-# Alternative: Build on more powerful machine and transfer binary
-# See BUILD_ALTERNATIVES.md for remote build options
+# Retry build
+cd /srv/Hora-Police
+./build-lowmem.sh
 ```
+
+**Solution 2: Use Low-Memory Build Script**
+```bash
+cd /srv/Hora-Police
+chmod +x build-lowmem.sh
+./build-lowmem.sh
+```
+
+This script uses:
+- Single job (`-j1`) to reduce memory usage
+- Lower optimization (`opt-level=2`)
+- No LTO to reduce memory pressure
+- Deterministic builds (`--locked`)
+
+**Solution 3: Build Elsewhere and Transfer**
+```bash
+# On local machine with more RAM
+cargo build --release
+scp target/release/hora-police deploy@VPS_IP:/tmp/hora-police
+
+# On VPS
+cd /srv/Hora-Police
+./scripts/install-binary.sh
+```
+
+#### Compile Errors
+
+**Error: `linker 'cc' not found`**
+```bash
+# Install build dependencies
+sudo apt-get install -y build-essential
+# Or use the automated script
+./install-build-deps.sh
+```
+
+**Error: `no method named 'as_()' found for reference '&Uid'`**
+- Fixed in v0.1.0: Added `num-traits` dependency and `AsPrimitive` trait import
+- Ensure `Cargo.toml` includes `num-traits = "0.2"`
+- Pull latest code: `git pull`
+
+**Error: `future cannot be sent between threads safely`**
+- Fixed in v0.1.0: Replaced recursive `tokio::spawn` with logging approach
+- Parent escalation now logs warnings instead of recursive calls
 
 ---
 
@@ -1352,11 +1468,33 @@ Hora-Police is a comprehensive, high-performance anti-malware system designed fo
 
 ---
 
-**Document Version**: 1.1  
-**Last Updated**: December 27, 2025  
+**Document Version**: 1.2  
+**Last Updated**: December 28, 2025  
 **Maintained By**: Hora-Police Development Team
 
-### Recent Updates (v1.1)
+### Recent Updates (v1.2 - December 28, 2025)
+
+**Build and Compilation Fixes**:
+- **Fixed**: Uid API compatibility - Added `num-traits` dependency and `AsPrimitive` trait import for sysinfo 0.30+
+- **Fixed**: Recursive async function - Replaced `tokio::spawn` with logging approach to avoid Send requirement
+- **Fixed**: Cargo.toml dependency name - Changed `num_traits` to `num-traits` (hyphenated crate name)
+- **Added**: `install-build-deps.sh` - Automated script to install all build dependencies
+- **Enhanced**: `build-lowmem.sh` - Low-memory build profile with single job, no LTO, lower optimization
+- **Added**: `scripts/install-binary.sh` - Safe deployment script with comprehensive verification
+
+**Deployment Improvements**:
+- **Added**: Standalone install script that works without git pull
+- **Improved**: Build script checks for C compiler before attempting build
+- **Enhanced**: Error messages with clear remediation steps
+- **Added**: Support for building on low-memory VPS with swap space
+
+**Documentation Updates**:
+- **Updated**: Deployment guide with low-memory build options
+- **Added**: Troubleshooting for compile errors (linker, Uid API, Send requirement)
+- **Enhanced**: OOM error resolution with swap space instructions
+- **Updated**: Prerequisites to include all required build dependencies
+
+### Previous Updates (v1.1)
 
 - **Fixed**: Service NAMESPACE error by ensuring `/var/log/hora-police` directory exists
 - **Added**: tmpfiles.d configuration for automatic directory creation on boot
