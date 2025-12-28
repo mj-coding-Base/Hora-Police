@@ -30,6 +30,11 @@
 
 set -euo pipefail
 
+# Ensure script is executable
+if [ ! -x "$0" ]; then
+    chmod +x "$0" 2>/dev/null || true
+fi
+
 # Configuration
 REPO_DIR="/srv/Hora-Police"
 LOG_FILE="/tmp/hora-police-deploy.log"
