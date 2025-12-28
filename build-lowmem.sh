@@ -5,6 +5,20 @@ set -euo pipefail
 
 echo "🛡️  Building Hora-Police with low-memory profile..."
 
+# Check for C compiler
+if ! command -v cc >/dev/null 2>&1; then
+    echo "❌ C compiler (cc) not found!"
+    echo ""
+    echo "Please install build dependencies first:"
+    echo "  chmod +x install-build-deps.sh"
+    echo "  ./install-build-deps.sh"
+    echo ""
+    echo "Or manually:"
+    echo "  sudo apt update"
+    echo "  sudo apt install -y build-essential pkg-config libssl-dev libsqlite3-dev"
+    exit 1
+fi
+
 # Load cargo env if available
 source "$HOME/.cargo/env" || true
 

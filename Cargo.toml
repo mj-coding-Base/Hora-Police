@@ -30,6 +30,7 @@ clap = { version = "4.0", features = ["derive"] }
 hmac = "0.12"
 rand = "0.8"
 sd-notify = "0.4"
+num_traits = "0.2"
 
 [profile.release]
 lto = true

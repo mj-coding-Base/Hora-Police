@@ -3,6 +3,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use sysinfo::{Pid, System, Process, User, Uid};
+use num_traits::cast::AsPrimitive;
 
 /// Helper function to convert sysinfo Uid to u32
 /// sysinfo 0.30+ uses .as_() instead of .as_raw()
