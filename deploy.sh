@@ -287,16 +287,72 @@ build_local() {
         source "$HOME/.cargo/env"
     fi
     
+    # Update Cargo.lock if needed (check first to avoid unnecessary update)
+    log_info "Ensuring Cargo.lock is up to date..."
+    if [ "$DRY_RUN" = false ]; then
+        cargo update --dry-run >/dev/null 2>&1 || {
+            log_info "Updating Cargo.lock..."
+            cargo update || true
+        }
+    fi
+    
     # Try build-lowmem.sh first
     if [ -f "./build-lowmem.sh" ]; then
         log_info "Using build-lowmem.sh script"
         chmod +x ./build-lowmem.sh
-        run_cmd "./build-lowmem.sh"
+        
+        # Try build with build script
+        if [ "$DRY_RUN" = false ]; then
+            if ./build-lowmem.sh 2>&1 | tee -a "$LOG_FILE"; then
+                # Build succeeded
+                :
+            else
+                local build_exit=$?
+                # Check if error is about lock file by checking last few lines
+                local last_error
+                last_error=$(tail -5 "$LOG_FILE" 2>/dev/null || echo "")
+                
+                if echo "$last_error" | grep -q "lock file.*needs to be updated.*--locked"; then
+                    log_warn "Cargo.lock is outdated, updating and retrying build without --locked..."
+                    cargo update || true
+                    # Build directly without --locked
+                    log_info "Building without --locked flag..."
+                    export RUSTFLAGS="-C codegen-units=1 -C opt-level=2"
+                    export CARGO_BUILD_JOBS=1
+                    cargo build --release -j1 2>&1 | tee -a "$LOG_FILE" || return 1
+                else
+                    return 1
+                fi
+            fi
+        else
+            run_cmd "./build-lowmem.sh"
+        fi
     else
         log_info "Building with cargo (low-memory flags)..."
         export RUSTFLAGS="-C codegen-units=1 -C opt-level=1 -C linker=lld"
         export CARGO_BUILD_JOBS=1
-        run_cmd "cargo build --release -j1 --locked"
+        
+        # Try with --locked first, fallback without if lock file error
+        if [ "$DRY_RUN" = false ]; then
+            if cargo build --release -j1 --locked 2>&1 | tee -a "$LOG_FILE"; then
+                # Build succeeded
+                :
+            else
+                local build_exit=$?
+                local last_error
+                last_error=$(tail -5 "$LOG_FILE" 2>/dev/null || echo "")
+                
+                if echo "$last_error" | grep -q "lock file.*needs to be updated.*--locked"; then
+                    log_warn "Cargo.lock is outdated, updating and retrying without --locked..."
+                    cargo update || true
+                    cargo build --release -j1 2>&1 | tee -a "$LOG_FILE" || return 1
+                else
+                    return 1
+                fi
+            fi
+        else
+            run_cmd "cargo build --release -j1 --locked"
+        fi
     fi
     
     # Verify binary exists
