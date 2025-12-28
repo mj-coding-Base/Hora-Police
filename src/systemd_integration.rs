@@ -214,6 +214,65 @@ impl SystemdIntegration {
     pub fn get_all_units(&self) -> &[SystemdUnit] {
         &self.units
     }
+
+    /// Detect and remove malicious systemd services
+    pub fn detect_malicious_services(&mut self, malware_path: &std::path::Path) -> Result<Vec<String>> {
+        let mut removed = Vec::new();
+        let malware_path_str = malware_path.to_string_lossy();
+        let malware_name = malware_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Refresh units
+        let _ = self.detect_units();
+
+        for unit in &self.units {
+            let exec_lower = unit.exec_start.to_lowercase();
+            let mut is_malicious = false;
+
+            // Check if ExecStart references the malware file
+            if unit.exec_start.contains(&*malware_path_str) || exec_lower.contains(&malware_name) {
+                is_malicious = true;
+            }
+
+            // Check for suspicious patterns
+            let suspicious_patterns = ["/tmp/", "/var/tmp/", "/dev/shm/", "solrz", "e386", "payload.so"];
+            for pattern in &suspicious_patterns {
+                if exec_lower.contains(pattern) {
+                    is_malicious = true;
+                    break;
+                }
+            }
+
+            if is_malicious {
+                info!("🗑️  Removing malicious systemd service: {}", unit.name);
+                
+                // Stop and disable the service
+                if let Err(e) = Command::new("systemctl")
+                    .args(&["stop", &unit.name])
+                    .output() {
+                    warn!("Failed to stop service {}: {}", unit.name, e);
+                }
+                
+                if let Err(e) = Command::new("systemctl")
+                    .args(&["disable", &unit.name])
+                    .output() {
+                    warn!("Failed to disable service {}: {}", unit.name, e);
+                }
+
+                // Remove the service file
+                if let Err(e) = std::fs::remove_file(&unit.service_file) {
+                    warn!("Failed to remove service file {}: {}", unit.service_file.display(), e);
+                } else {
+                    removed.push(unit.name.clone());
+                    info!("✅ Removed malicious systemd service: {}", unit.name);
+                }
+            }
+        }
+
+        Ok(removed)
+    }
 }
 
 impl Default for SystemdIntegration {

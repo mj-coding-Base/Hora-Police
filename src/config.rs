@@ -44,6 +44,8 @@ pub struct Config {
     
     #[serde(default = "default_adaptive_load_factor")]
     pub adaptive_polling_load_factor: f64,
+    #[serde(default = "default_file_blocking")]
+    pub file_blocking: FileBlockingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +58,48 @@ pub struct FileScanningConfig {
     pub kill_processes_using_file: bool,
     #[serde(default = "default_aggressive_cleanup")]
     pub aggressive_cleanup: bool,
+    #[serde(default = "default_true")]
+    pub use_hash_cache: bool,
+    #[serde(default = "default_true")]
+    pub incremental_scan: bool,
+    #[serde(default = "default_true")]
+    pub parallel_scan: bool,
+    #[serde(default = "default_max_scan_threads")]
+    pub max_scan_threads: usize,
+}
+
+fn default_max_scan_threads() -> usize {
+    4
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileBlockingConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub block_recreation: bool,
+    #[serde(default = "default_block_interval")]
+    pub monitor_interval_seconds: u64,
+}
+
+fn default_block_interval() -> u64 {
+    5
+}
+
+fn default_file_blocking() -> FileBlockingConfig {
+    FileBlockingConfig {
+        enabled: true,
+        block_recreation: true,
+        monitor_interval_seconds: 5,
+    }
+}
+
+fn default_file_blocking() -> FileBlockingConfig {
+    FileBlockingConfig {
+        enabled: true,
+        block_recreation: true,
+        monitor_interval_seconds: 5,
+    }
 }
 
 fn default_aggressive_cleanup() -> bool {
@@ -91,6 +135,10 @@ fn default_file_scanning() -> FileScanningConfig {
         auto_delete: false,
         kill_processes_using_file: true,
         aggressive_cleanup: true,
+        use_hash_cache: true,
+        incremental_scan: true,
+        parallel_scan: true,
+        max_scan_threads: 4,
     }
 }
 
@@ -160,6 +208,7 @@ impl Config {
             },
             adaptive_polling: true,
             adaptive_polling_load_factor: 1.5,
+            file_blocking: default_file_blocking(),
         }
     }
 }

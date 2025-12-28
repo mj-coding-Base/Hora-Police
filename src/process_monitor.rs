@@ -144,6 +144,41 @@ impl ProcessMonitor {
         tree
     }
 
+    /// Get all child processes (recursively) of a given PID
+    pub fn get_child_processes(&self, parent_pid: i32) -> Vec<i32> {
+        let mut children = Vec::new();
+        let mut to_check = vec![parent_pid];
+        let mut checked = std::collections::HashSet::new();
+
+        while let Some(pid) = to_check.pop() {
+            if checked.contains(&pid) {
+                continue;
+            }
+            checked.insert(pid);
+
+            // Find all processes with this PID as parent
+            for (process_pid, process) in self.system.processes() {
+                let process_pid_int = process_pid.as_u32() as i32;
+                if let Some(ppid) = process.parent() {
+                    let ppid_int = ppid.as_u32() as i32;
+                    if ppid_int == pid && process_pid_int != parent_pid {
+                        children.push(process_pid_int);
+                        to_check.push(process_pid_int);
+                    }
+                }
+            }
+        }
+
+        children
+    }
+
+    /// Get the full process tree (parent + all children) for a given PID
+    pub fn get_full_process_tree(&self, pid: i32) -> Vec<i32> {
+        let mut tree = vec![pid];
+        tree.extend(self.get_child_processes(pid));
+        tree
+    }
+
     pub fn is_safe_binary(&self, binary_path: &str) -> bool {
         // Whitelist of known safe binaries
         let safe_binaries = [

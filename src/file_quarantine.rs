@@ -87,7 +87,22 @@ impl FileQuarantine {
         }
     }
 
-    /// Kill any processes using the file
+    /// Check if a process has a file open by examining /proc/PID/fd
+    fn process_has_file_open(pid: i32, file_path: &Path) -> bool {
+        let fd_dir = format!("/proc/{}/fd", pid);
+        if let Ok(entries) = std::fs::read_dir(&fd_dir) {
+            for entry in entries.flatten() {
+                if let Ok(target) = std::fs::read_link(entry.path()) {
+                    if target == file_path {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Kill any processes using the file (enhanced with file handle detection and process tree killing)
     pub async fn kill_processes_using_file(&self, file_path: &Path) -> Result<Vec<i32>> {
         use crate::process_monitor::ProcessMonitor;
         
@@ -95,40 +110,87 @@ impl FileQuarantine {
         monitor.refresh();
         
         let processes = monitor.get_all_processes()?;
-        let mut killed_pids = Vec::new();
+        let mut pids_to_kill = std::collections::HashSet::new();
         let file_path_str = file_path.to_string_lossy();
 
         for process in processes {
-            // Check if process binary matches the file
+            // Method 1: Check if process binary matches the file
             if process.binary_path == file_path_str {
-                info!("🔪 Killing process PID {} using malicious file: {}", 
+                info!("🔍 Found process PID {} with binary matching malicious file: {}", 
                       process.pid, file_path_str);
-                
-                let pid_obj = Pid::from_raw(process.pid);
-                if signal::kill(pid_obj, signal::Signal::SIGTERM).is_ok() {
-                    killed_pids.push(process.pid);
-                    
-                    // Wait and force kill if needed
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    if monitor.get_process_by_pid(process.pid).is_some() {
-                        let _ = signal::kill(pid_obj, signal::Signal::SIGKILL);
-                    }
-                }
+                pids_to_kill.insert(process.pid);
             }
 
-            // Check if command line references the file
+            // Method 2: Check if command line references the file
             if process.command_line.contains(&*file_path_str) {
-                info!("🔪 Killing process PID {} referencing malicious file: {}", 
+                info!("🔍 Found process PID {} with command line referencing malicious file: {}", 
                       process.pid, file_path_str);
+                pids_to_kill.insert(process.pid);
+            }
+
+            // Method 3: Check if process has the file open via file descriptors
+            if Self::process_has_file_open(process.pid, file_path) {
+                info!("🔍 Found process PID {} with file descriptor open to malicious file: {}", 
+                      process.pid, file_path_str);
+                pids_to_kill.insert(process.pid);
+            }
+        }
+
+        // Kill all identified processes and their process trees
+        let mut killed_pids = Vec::new();
+
+        for pid in pids_to_kill {
+            info!("🔪 Killing process tree for PID {} using malicious file: {}", 
+                  pid, file_path_str);
+            
+            // Get the full process tree (parent + all children)
+            let tree_pids = monitor.get_full_process_tree(pid);
+            
+            // Kill children first (reverse order to kill deepest first)
+            let mut children_first = tree_pids.clone();
+            children_first.reverse();
+            
+            for tree_pid in children_first {
+                if tree_pid == pid {
+                    continue; // Kill parent last
+                }
                 
-                let pid_obj = Pid::from_raw(process.pid);
+                let pid_obj = Pid::from_raw(tree_pid);
                 if signal::kill(pid_obj, signal::Signal::SIGTERM).is_ok() {
-                    killed_pids.push(process.pid);
-                    
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    if monitor.get_process_by_pid(process.pid).is_some() {
-                        let _ = signal::kill(pid_obj, signal::Signal::SIGKILL);
-                    }
+                    killed_pids.push(tree_pid);
+                    info!("✅ Sent SIGTERM to child PID {}", tree_pid);
+                }
+            }
+            
+            // Wait for children to terminate
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            
+            // Force kill any remaining children
+            monitor.refresh();
+            for tree_pid in monitor.get_full_process_tree(pid) {
+                if tree_pid == pid {
+                    continue; // Handle parent separately
+                }
+                if monitor.get_process_by_pid(tree_pid).is_some() {
+                    let pid_obj = Pid::from_raw(tree_pid);
+                    let _ = signal::kill(pid_obj, signal::Signal::SIGKILL);
+                    warn!("⚠️  Force killed child PID {}", tree_pid);
+                }
+            }
+            
+            // Now kill the parent
+            let pid_obj = Pid::from_raw(pid);
+            if signal::kill(pid_obj, signal::Signal::SIGTERM).is_ok() {
+                killed_pids.push(pid);
+                info!("✅ Sent SIGTERM to parent PID {}", pid);
+                
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                
+                // Force kill if still alive
+                monitor.refresh();
+                if monitor.get_process_by_pid(pid).is_some() {
+                    let _ = signal::kill(pid_obj, signal::Signal::SIGKILL);
+                    warn!("⚠️  Force killed parent PID {}", pid);
                 }
             }
         }
@@ -273,10 +335,36 @@ impl FileQuarantine {
         // Check all cron locations
         let mut cron_watcher = CronWatcher::new();
         if let Ok(jobs) = cron_watcher.scan_all() {
+            let malware_name = malware_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            
             for job in jobs {
-                // Check if cron job references the malware file
+                let job_content_lower = job.content.to_lowercase();
+                let mut should_remove = false;
+                
+                // Direct path reference
                 if job.content.contains(&*malware_path_str) {
-                    info!("🗑️  Removing cron job referencing malware: {}", job.file_path);
+                    should_remove = true;
+                }
+                
+                // Check for obfuscated references
+                if job_content_lower.contains(&malware_name) {
+                    should_remove = true;
+                }
+                
+                // Check for suspicious patterns
+                let suspicious_patterns = ["wget", "curl", "base64", "eval", "bash.*<"];
+                for pattern in &suspicious_patterns {
+                    if job_content_lower.contains(pattern) {
+                        should_remove = true;
+                        break;
+                    }
+                }
+                
+                if should_remove {
+                    info!("🗑️  Removing suspicious cron job: {}", job.file_path);
                     
                     // Try to remove the cron entry
                     if let Err(e) = self.remove_cron_entry(&job.file_path, &job.content) {

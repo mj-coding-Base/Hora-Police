@@ -254,6 +254,30 @@ impl IntelligenceDB {
         .execute(&*self.pool)
         .await?;
 
+        // File scan cache table for optimization
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS file_scan_cache (
+                file_path TEXT PRIMARY KEY,
+                file_hash TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                modified_time INTEGER NOT NULL,
+                last_scanned DATETIME NOT NULL
+            )
+            "#,
+        )
+        .execute(&*self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_scan_cache_modified ON file_scan_cache(modified_time);
+            CREATE INDEX IF NOT EXISTS idx_scan_cache_scanned ON file_scan_cache(last_scanned);
+            "#,
+        )
+        .execute(&*self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -571,6 +595,59 @@ impl IntelligenceDB {
     /// Vacuum database to reclaim space
     pub async fn vacuum_database(&self) -> Result<()> {
         sqlx::query("VACUUM")
+            .execute(&*self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get cached file hash and metadata if file hasn't changed
+    pub async fn get_file_cache(&self, file_path: &str, current_mtime: i64) -> Result<Option<(String, i64)>> {
+        let cached = sqlx::query(
+            r#"
+            SELECT file_hash, modified_time
+            FROM file_scan_cache
+            WHERE file_path = ? AND modified_time = ?
+            "#,
+        )
+        .bind(file_path)
+        .bind(current_mtime)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        if let Some(row) = cached {
+            Ok(Some((
+                row.get::<String, _>(0),
+                row.get::<i64, _>(1),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Update file scan cache
+    pub async fn update_file_cache(&self, file_path: &str, file_hash: &str, file_size: i64, modified_time: i64) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO file_scan_cache (file_path, file_hash, file_size, modified_time, last_scanned)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(file_path)
+        .bind(file_hash)
+        .bind(file_size)
+        .bind(modified_time)
+        .bind(Utc::now())
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Clean old cache entries (older than specified days)
+    pub async fn clean_file_cache(&self, days: u64) -> Result<()> {
+        let cutoff = Utc::now() - chrono::Duration::days(days as i64);
+        sqlx::query("DELETE FROM file_scan_cache WHERE last_scanned < ?")
+            .bind(cutoff)
             .execute(&*self.pool)
             .await?;
         Ok(())

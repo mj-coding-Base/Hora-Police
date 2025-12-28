@@ -11,6 +11,7 @@ pub mod intelligence;
 pub mod telegram;
 pub mod file_scanner;
 pub mod file_quarantine;
+pub mod file_blocker;
 pub mod environment;
 pub mod pm2_integration;
 pub mod systemd_integration;

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{error, info, warn};
 use tokio::time::{sleep, Duration};
 
@@ -16,6 +17,7 @@ use crate::react_detector::ReactDetector;
 use crate::telegram::TelegramReporter;
 use crate::file_scanner::FileScanner;
 use crate::file_quarantine::FileQuarantine;
+use crate::file_blocker::FileBlocker;
 use crate::environment::SystemEnvironment;
 use crate::pm2_integration::Pm2Integration;
 use crate::systemd_integration::SystemdIntegration;
@@ -138,14 +140,19 @@ impl SentinelDaemon {
         let deploy_detector = DeployDetector::new(config.deploy_grace_minutes);
 
         // Initialize file scanner if enabled
-        let (file_scanner, file_quarantine, file_watcher) = if config.file_scanning.enabled {
+        let (file_scanner, file_quarantine, file_watcher, file_blocker) = if config.file_scanning.enabled {
             let scan_paths: Vec<PathBuf> = config.file_scanning.scan_paths
                 .iter()
                 .map(|p| PathBuf::from(p))
                 .collect();
             let quarantine_path = PathBuf::from(&config.file_scanning.quarantine_path);
             
-            let scanner = FileScanner::new(scan_paths.clone(), quarantine_path.clone());
+            let scanner = FileScanner::new_with_config(
+                scan_paths.clone(),
+                quarantine_path.clone(),
+                Some(Arc::new(db.clone())),
+                config.file_scanning.clone(),
+            );
             let quarantine = FileQuarantine::new_with_cleanup(
                 quarantine_path,
                 config.file_scanning.auto_delete,
@@ -158,12 +165,27 @@ impl SentinelDaemon {
                 info!("✅ File watcher initialized (inotify enabled)");
             }
             
+            // Initialize file blocker if enabled
+            let blocker = if config.file_blocking.enabled {
+                FileBlocker::new(
+                    Vec::new(), // Will be populated when malware is detected
+                    scan_paths.clone(),
+                    Some(Arc::new(db.clone())),
+                    config.file_blocking.enabled,
+                ).ok()
+            } else {
+                None
+            };
+            if blocker.is_some() {
+                info!("✅ File blocker initialized");
+            }
+            
             info!("✅ File scanner initialized (scanning {} paths)", 
                   config.file_scanning.scan_paths.len());
             
-            (Some(scanner), Some(quarantine), watcher)
+            (Some(scanner), Some(quarantine), watcher, blocker)
         } else {
-            (None, None, None)
+            (None, None, None, None)
         };
 
         Ok(Self {
@@ -180,6 +202,7 @@ impl SentinelDaemon {
             telegram,
             file_scanner,
             file_quarantine,
+            file_blocker,
             environment,
             pm2,
             systemd,
@@ -187,6 +210,7 @@ impl SentinelDaemon {
             whitelist,
             deploy_detector,
             file_watcher,
+            file_blocker,
             deploy_cleanup_counter: 0,
             db_maintenance_counter: 0,
             zombie_reaper: ZombieReaper::new(100), // Alert if > 100 zombies
@@ -491,6 +515,17 @@ impl SentinelDaemon {
                 }
             }
 
+            // Monitor and block file recreation attempts
+            if self.config.file_blocking.enabled {
+                if let Some(ref mut blocker) = self.file_blocker {
+                    if let Ok(blocked_attempts) = blocker.monitor_and_block().await {
+                        if !blocked_attempts.is_empty() {
+                            warn!("🚨 Blocked {} file recreation attempt(s)", blocked_attempts.len());
+                        }
+                    }
+                }
+            }
+
             // Periodically scan for malware files
             if self.config.file_scanning.enabled {
                 file_scan_counter += 1;
@@ -502,12 +537,25 @@ impl SentinelDaemon {
                         
                         info!("🔍 Starting file system malware scan...");
                         
-                        match scanner.scan_all_paths() {
+                        match scanner.scan_all_paths().await {
                             Ok(detected_files) => {
                                 if !detected_files.is_empty() {
                                     warn!("🚨 Found {} malicious file(s)!", detected_files.len());
                                     
                                     for malware in detected_files {
+                                        // Block file recreation if enabled
+                                        if self.config.file_blocking.enabled && self.config.file_blocking.block_recreation {
+                                            if let Some(ref mut blocker) = self.file_blocker {
+                                                if let Err(e) = blocker.block_path(&malware.file_path) {
+                                                    warn!("Failed to block path {}: {}", 
+                                                          malware.file_path.display(), e);
+                                                } else {
+                                                    info!("🚫 Blocked malware file from recreation: {}", 
+                                                          malware.file_path.display());
+                                                }
+                                            }
+                                        }
+                                        
                                         // Kill processes using the file if configured
                                         if self.config.file_scanning.kill_processes_using_file {
                                             if let Err(e) = quarantine

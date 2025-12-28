@@ -67,18 +67,40 @@ impl BehaviorIntelligence {
             confidence *= 0.3; // Reduce but don't eliminate
         }
 
-        // Increase if command line looks suspicious
-        if process.command_line.contains("miner")
-            || process.command_line.contains("xmrig")
-            || process.command_line.contains("crypto") {
-            confidence += 0.3;
+        // Enhanced command line pattern matching
+        let suspicious_patterns = [
+            "miner", "xmrig", "crypto", "mining", "ccminer", "cpuminer",
+            "stratum", "pool", "hashrate", "rig", "gpu", "cuda",
+            "base64", "eval", "exec", "wget.*sh", "curl.*sh",
+            "\.sh.*\|", "bash.*-c", "sh.*-c",
+        ];
+        let cmd_lower = process.command_line.to_lowercase();
+        for pattern in &suspicious_patterns {
+            if cmd_lower.contains(pattern) {
+                confidence += 0.2;
+                break; // Only count once
+            }
         }
 
         // Increase if running from unusual locations
         if process.binary_path.starts_with("/tmp/")
             || process.binary_path.starts_with("/var/tmp/")
-            || process.binary_path.contains("/.cache/") {
+            || process.binary_path.contains("/.cache/")
+            || process.binary_path.contains("/dev/shm/")
+            || process.binary_path.contains("/.local/") {
             confidence += 0.2;
+        }
+
+        // File permission analysis (if we can check)
+        // Note: This would require additional file system access
+        // For now, we'll use path heuristics
+        
+        // Process relationship analysis
+        // Suspicious: process with unusual parent (not init/systemd)
+        if process.ppid > 1 && process.ppid != process.pid {
+            // Check if parent is suspicious (would need process monitor access)
+            // For now, we'll use a simple heuristic
+            confidence += 0.1;
         }
 
         Ok(confidence.min(1.0f32))
