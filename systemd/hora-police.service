@@ -1,0 +1,26 @@
+[Unit]
+Description=Hora-Police Anti-Malware Daemon
+Documentation=https://github.com/mj-coding-Base/Hora-Police
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadOnlyPaths=/proc /sys
+ReadWritePaths=/var/lib/hora-police /etc/hora-police /var/log/hora-police
+ExecStart=/usr/local/bin/hora-police /etc/hora-police/config.toml
+Restart=on-failure
+RestartSec=5s
+MemoryMax=128M
+CPUQuota=15%
+TasksMax=1024
+
+[Install]
+WantedBy=multi-user.target
+

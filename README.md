@@ -85,6 +85,61 @@ cargo build --release
    sudo journalctl -u sentinel -f  # View logs
    ```
 
+## 🔄 Updating
+
+Hora-Police can be updated with a single command that handles the complete workflow:
+
+### Quick Update
+
+```bash
+cd /srv/Hora-Police
+sudo ./scripts/update.sh
+```
+
+This command will:
+- Check current version vs latest version
+- Backup current binary automatically
+- Pull latest code from git
+- Build new binary
+- Install and restart service
+- Verify service is running
+- Rollback automatically on failure
+
+### Update Options
+
+```bash
+# Preview changes without applying (dry-run)
+sudo ./scripts/update.sh --dry-run
+
+# Force update even if versions match
+sudo ./scripts/update.sh --force
+
+# Update from specific branch
+sudo ./scripts/update.sh --branch=fix/systemd-install
+
+# Check current version
+/usr/local/bin/hora-police --version
+```
+
+### Safety Features
+
+- **Automatic Backup**: Current binary is backed up to `/var/lib/hora-police/backups/` before update
+- **Automatic Rollback**: If update fails, previous version is automatically restored
+- **Version Check**: Skips update if already up-to-date (unless `--force` is used)
+- **Logging**: All update actions logged to `/var/log/hora-police/update.log`
+
+### Manual Update Steps
+
+If you prefer to update manually:
+
+```bash
+cd /srv/Hora-Police
+git pull
+./build-lowmem.sh
+cp target/release/hora-police /tmp/hora-police
+sudo ./scripts/install-binary.sh
+```
+
 ## ⚙️ Configuration
 
 Edit `/etc/sentinel/config.toml`:
