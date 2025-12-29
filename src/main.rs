@@ -26,6 +26,10 @@ struct Args {
     /// Start telemetry probe endpoint
     #[arg(long)]
     probe: bool,
+    
+    /// Show version information
+    #[arg(long, short)]
+    version: bool,
 }
 
 #[tokio::main]
@@ -36,6 +40,12 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+
+    // Handle version flag
+    if args.version {
+        println!("hora-police version {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
 
     info!("🚀 Hora-Police Anti-Malware Daemon starting...");
 
